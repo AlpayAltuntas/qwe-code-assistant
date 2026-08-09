@@ -16,9 +16,11 @@ file.
 
 import argparse
 import hashlib
+import io
 import json
 import shutil
 import sys
+import tarfile
 from pathlib import Path
 
 import httpx
@@ -53,7 +55,44 @@ SOURCES: list[tuple[str, str]] = [
     ),
 ]
 
+# The CII (Cross Industry Invoice) schema used by ZUGFeRD/Factur-X — see
+# Phase 5. Unlike the sources above, the annotated version (with real
+# per-element documentation, not just structure) isn't published at a
+# stable direct URL; it's only distributed inside the `factur-x` PyPI
+# package's sdist. Fetched by extracting one file from that tarball
+# rather than a plain GET — see _fetch_cii_schema.
+_FACTURX_SDIST_URL = (
+    "https://files.pythonhosted.org/packages/d2/b1/"
+    "678c0299a1b1fba356001645451868eab967c79a050e23b81ac21c74d038/"
+    "factur_x-6.7.tar.gz"
+)
+_FACTURX_SDIST_MEMBER = (
+    "factur_x-6.7/src/facturx/xsd_and_schematron/cii-extended-ctc-fr/"
+    "CrossIndustryInvoice_100pD22B_urn_un_unece_uncefact_data_standard_"
+    "ReusableAggregateBusinessInformationEntity_100.xsd"
+)
+CII_FILENAME = "cii_100pd22b_reusable_aggregate_business_information_entity.xsd"
+
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; qwe-code-assistant-ingest/0.1)"}
+
+
+def _fetch_cii_schema(dest_dir: Path) -> None:
+    response = httpx.get(_FACTURX_SDIST_URL, headers=_HEADERS, timeout=60.0, follow_redirects=True)
+    response.raise_for_status()
+    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as tar:
+        member = tar.getmember(_FACTURX_SDIST_MEMBER)
+        content = tar.extractfile(member).read()
+    dest = dest_dir / CII_FILENAME
+    dest.write_bytes(content)
+    log_ingest_event(
+        {
+            "event": "fetch",
+            "filename": CII_FILENAME,
+            "url": f"{_FACTURX_SDIST_URL}#{_FACTURX_SDIST_MEMBER}",
+            "bytes": len(content),
+        }
+    )
+    print(f"fetched {CII_FILENAME} ({len(content)} bytes) <- factur-x sdist")
 
 
 def _staging_dir() -> Path:
@@ -95,6 +134,8 @@ def cmd_fetch(_: argparse.Namespace) -> None:
         )
         print(f"fetched {filename} ({len(response.content)} bytes) <- {url}")
 
+    _fetch_cii_schema(dest_dir)
+
 
 def cmd_promote(args: argparse.Namespace) -> None:
     staging = _staging_dir()
@@ -107,6 +148,7 @@ def cmd_promote(args: argparse.Namespace) -> None:
         targets = [staging / args.filename]
 
     known_urls = dict(SOURCES)
+    known_urls[CII_FILENAME] = f"{_FACTURX_SDIST_URL}#{_FACTURX_SDIST_MEMBER}"
 
     for src in targets:
         if not src.is_file():

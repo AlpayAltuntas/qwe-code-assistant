@@ -1,10 +1,13 @@
 """Turns staged/promoted spec documents into (section, text) chunks.
 
-Two formats are handled for the Phase 3 corpus (EDIFACT INVOIC + UBL
-Invoice, per docs/architecture.md scope): EDIFACT segment-clarification
-HTML pages and UBL XSD schemas. Adding a new spec format later means
-adding one more `parse_*` function and a dispatch entry in
-`parse_document` — the rest of the ingestion pipeline is format-agnostic.
+Formats handled: EDIFACT segment-clarification HTML pages
+(parse_edifact_html) and XSD schemas with per-element documentation
+(parse_xsd_documentation — generic enough to cover both UBL's
+CCTS-structured annotations and CII's plain xsd:documentation labels,
+so Phase 5's ZUGFeRD/CII corpus addition needed no new parser). Adding a
+genuinely new document shape means adding one more `parse_*` function
+and a dispatch entry in `parse_document` — the rest of the ingestion
+pipeline is format-agnostic.
 """
 
 import re
@@ -91,10 +94,11 @@ def _ccts_fields(annotation_el) -> dict[str, str]:
     return fields
 
 
-def parse_ubl_xsd(path: Path) -> list[tuple[str, str]]:
-    """Extract per-element documentation (CCTS-structured where present,
-    plain xsd:documentation otherwise) plus name/type facts for elements
-    that carry no prose documentation at all."""
+def parse_xsd_documentation(path: Path) -> list[tuple[str, str]]:
+    """Extract per-element documentation (CCTS-structured where present —
+    UBL's style; plain xsd:documentation otherwise — CII's style) plus
+    name/type facts for elements that carry no prose documentation at
+    all. Generic across schema families: used for both UBL and CII XSDs."""
     tree = etree.parse(str(path))
     root = tree.getroot()
     ns = {"xsd": XSD_NS}
@@ -138,7 +142,7 @@ def parse_document(path: Path) -> list[tuple[str, str]]:
     if path.suffix in (".htm", ".html"):
         sections = parse_edifact_html(path)
     elif path.suffix == ".xsd":
-        sections = parse_ubl_xsd(path)
+        sections = parse_xsd_documentation(path)
     else:
         raise ValueError(f"no parser registered for extension {path.suffix!r} ({path})")
 

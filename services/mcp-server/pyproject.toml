@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "defusedxml>=0.7.1",
+    "factur-x>=6.7",
     "faker>=40.36.0",
     "httpx>=0.28.1",
     "lxml>=6.1.1",

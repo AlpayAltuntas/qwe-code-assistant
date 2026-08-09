@@ -19,16 +19,26 @@ uv run router-serve                 # starts the API on 127.0.0.1:8787
 permissions) on first run. Every request to `/route` and `/retrieve` must
 carry `Authorization: Bearer <token>` — see threat-model.md S2.
 
-## Corpus (Phase 3 scope: EDIFACT INVOIC + UBL Invoice)
+## Corpus (EDIFACT INVOIC + UBL Invoice + CII/ZUGFeRD, 5,011 chunks)
 
 - `edifact_d01b_invoic.html` — UN/EDIFACT D01B INVOIC segment clarifications
 - `ubl_2.1_invoice.xsd` + the UBL 2.1 CommonAggregateComponents/CommonBasicComponents
   schemas — OASIS UBL 2.1 Invoice document type and its component library
+- `cii_100pd22b_reusable_aggregate_business_information_entity.xsd` (Phase 5)
+  — the CII (Cross Industry Invoice) schema used by ZUGFeRD/Factur-X, with
+  real per-element documentation. Only available inside the `factur-x`
+  PyPI package's sdist (no stable public URL for the annotated version —
+  `cmd_fetch` downloads the sdist tarball and extracts just this one file;
+  see `_fetch_cii_schema` in `ingest.py`).
 
-Adding a new spec format means: add a `(filename, url)` entry to `SOURCES` in
-`ingest.py`, add a `parse_*` function in `parsing.py`, and register a new
-`DomainConfig` in `domains.py` if it's a new domain rather than more EDI
-coverage.
+Adding a new spec format means: add a `(filename, url)` entry to `SOURCES`
+in `ingest.py` (or a special-cased fetch step, if it's not a plain direct
+URL — see `_fetch_cii_schema`), add a `parse_*` function in `parsing.py` if
+the document shape is genuinely new (`parse_xsd_documentation` already
+covers any XSD with per-element `xsd:documentation`, CCTS-structured or
+plain — that's how the CII schema needed zero new parsing code), and
+register a new `DomainConfig` in `domains.py` if it's a new domain rather
+than more EDI coverage.
 
 ## Router cascade
 
@@ -67,9 +77,9 @@ downstream of that keystroke (classification, retrieval, citations,
 override) works exactly as designed. See `docs/architecture.md`'s
 "Invocation note" for the full story.
 
-## Not yet wired up
+## Related: EDI tool functions
 
-The EDI *tool* calls the specialist layer will eventually request
-(`parse_edi`, `validate_with_citation`, `map_format`,
-`generate_synthetic_invoice`) don't exist yet — that's `services/mcp-server`,
-Phase 4.
+The EDI *tool* calls (`parse_edi`, `validate_with_citation`, `map_format`,
+`generate_synthetic_invoice`) live in `services/mcp-server` (Phases 4-5) and
+call this service's `/retrieve` endpoint internally for citations — see
+that service's README.

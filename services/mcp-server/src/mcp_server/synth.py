@@ -9,6 +9,7 @@ from faker import Faker
 
 from mcp_server.edifact import write_segments
 from mcp_server.ubl import InvoiceFields, build_invoice_xml
+from mcp_server.zugferd import assemble_pdf, build_cii_xml
 
 
 def _fake(seed: int | None) -> Faker:
@@ -87,3 +88,66 @@ def generate_synthetic_ubl_invoice(seed: int | None = None, num_lines: int = 2) 
         lines=lines,
     )
     return build_invoice_xml(fields)
+
+
+VAT_RATE = 19  # fixed test rate — synthetic data, not a real jurisdiction lookup
+
+
+def generate_synthetic_zugferd_invoice(
+    seed: int | None = None, num_lines: int = 2
+) -> tuple[str, bytes]:
+    """Returns (cii_xml_text, pdf_bytes) — a Factur-X/ZUGFeRD (EN16931
+    level) invoice with the CII XML embedded in a minimal PDF/A-3
+    carrier. See zugferd.py for the "blank visual layer" scope note."""
+    fake = _fake(seed)
+    issue_date = fake.date_this_year()
+
+    lines = []
+    net_total = 0.0
+    for i in range(1, num_lines + 1):
+        qty = fake.random_int(min=1, max=50)
+        price = round(fake.pyfloat(min_value=1, max_value=500, right_digits=2), 2)
+        amount = round(qty * price, 2)
+        net_total += amount
+        lines.append(
+            {
+                "BT-126": str(i),
+                "BT-153": fake.catch_phrase(),
+                "BT-146": f"{price:.2f}",
+                "BT-129": str(qty),
+                "BT-130": "EA",
+                "BT-131": f"{amount:.2f}",
+                "BT-151": "S",
+                "BT-152": str(VAT_RATE),
+            }
+        )
+
+    tax_amount = round(net_total * VAT_RATE / 100, 2)
+    grand_total = round(net_total + tax_amount, 2)
+
+    data_dict = {
+        "BT-24": None,
+        "BT-1": str(fake.random_int(min=10000, max=99999)),
+        "BT-2": issue_date,
+        "BT-3": "380",
+        "BT-5": "EUR",
+        "BT-72": issue_date,
+        "BT-27": fake.company(),
+        "BT-40": "DE",
+        "BT-44": fake.company(),
+        "BT-55": fake.random_element(elements=("DE", "FR", "NL", "BE")),
+        "BT-106": f"{net_total:.2f}",
+        "BT-109": f"{net_total:.2f}",
+        "BT-110": f"{tax_amount:.2f}",
+        "BT-110-1": "EUR",
+        "BT-112": f"{grand_total:.2f}",
+        "BT-115": f"{grand_total:.2f}",
+        "BG-23": [
+            {"BT-116": f"{net_total:.2f}", "BT-117": f"{tax_amount:.2f}", "BT-118": "S", "BT-119": str(VAT_RATE)}
+        ],
+        "BG-25": lines,
+    }
+
+    xml_text = build_cii_xml(data_dict, level="en16931")
+    pdf_bytes = assemble_pdf(xml_text)
+    return xml_text, pdf_bytes

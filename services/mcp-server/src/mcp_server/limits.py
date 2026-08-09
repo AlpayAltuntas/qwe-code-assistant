@@ -6,11 +6,21 @@ pass: hard size caps before any parsing, and wall-clock timeouts around
 parse calls so a pathological payload can't hang the process.
 """
 
-import signal
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeoutError
+from typing import Callable, TypeVar
 
 MAX_INPUT_BYTES = 512_000  # generous for a single invoice; not for a batch
 PARSE_TIMEOUT_SECONDS = 5
+
+T = TypeVar("T")
+
+# MCP tool calls run on a worker thread (not the main interpreter thread),
+# which rules out signal.alarm-based timeouts (SIGALRM only works in the
+# main thread — confirmed the hard way: it raised ValueError at runtime
+# under real MCP tool dispatch, even though it worked fine in a plain
+# script). Running the guarded call in its own thread and bounding
+# .result() works from any calling thread.
+_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="edi-parse")
 
 
 class InputTooLarge(ValueError):
@@ -27,22 +37,16 @@ def check_size(text: str) -> None:
         raise InputTooLarge(f"input is {size} bytes, exceeds the {MAX_INPUT_BYTES}-byte cap")
 
 
-@contextmanager
-def parse_timeout(seconds: int = PARSE_TIMEOUT_SECONDS):
-    """Unix-only wall-clock timeout (SIGALRM) around a parse call.
-
-    Good enough for a single-user local service handling one request at a
-    time; not a substitute for the process-level isolation a real sandbox
-    (Docker, deferred) would provide against a truly adversarial payload.
-    """
-
-    def _on_alarm(signum, frame):
-        raise ParseTimeout(f"parsing exceeded {seconds}s")
-
-    previous = signal.signal(signal.SIGALRM, _on_alarm)
-    signal.alarm(seconds)
+def run_with_timeout(fn: Callable[[], T], seconds: int = PARSE_TIMEOUT_SECONDS) -> T:
+    """Runs fn() with a wall-clock timeout. If it fires, the caller gets
+    control back and can report the error — but note this can't forcibly
+    kill the worker thread, so a truly runaway parse keeps consuming
+    resources in the background until it finishes on its own. Real
+    enforcement is what the deferred Docker sandbox is for; this is
+    defense-in-depth on top of disabled entity resolution (the actual
+    "billion laughs" mitigation) and the size cap above."""
+    future = _EXECUTOR.submit(fn)
     try:
-        yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
+        return future.result(timeout=seconds)
+    except _FutureTimeoutError as exc:
+        raise ParseTimeout(f"parsing exceeded {seconds}s") from exc

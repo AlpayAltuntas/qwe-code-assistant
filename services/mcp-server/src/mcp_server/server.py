@@ -6,6 +6,7 @@ typed signature — the model can request one of exactly these four
 operations, nothing else.
 """
 
+import base64
 from typing import Literal
 
 import defusedxml.ElementTree as safe_ET
@@ -14,11 +15,41 @@ from mcp.server.mcpserver import MCPServer
 from mcp_server.citations import fetch_citations
 from mcp_server.edifact import tokenize as edifact_tokenize
 from mcp_server.edifact import validate_structure as edifact_validate_structure
-from mcp_server.limits import ParseTimeout, check_size, parse_timeout
+from mcp_server.limits import ParseTimeout, check_size, run_with_timeout
 from mcp_server.mapping import map_edifact_invoic_to_ubl
-from mcp_server.synth import generate_synthetic_edifact_invoic, generate_synthetic_ubl_invoice
+from mcp_server.synth import (
+    generate_synthetic_edifact_invoic,
+    generate_synthetic_ubl_invoice,
+    generate_synthetic_zugferd_invoice,
+)
 from mcp_server.ubl import build_invoice_xml
 from mcp_server.ubl import validate as ubl_validate
+from mcp_server.zugferd import extract_cii_from_pdf
+from mcp_server.zugferd import validate_cii as zugferd_validate_cii
+
+EdiFormat = Literal["edifact", "ubl", "cii", "zugferd"]
+
+
+def _walk_xml_tree(el, path: str = "") -> list[dict]:
+    tag = el.tag.split("}")[-1] if "}" in el.tag else el.tag
+    current = f"{path}/{tag}"
+    items = []
+    text = (el.text or "").strip()
+    if text:
+        items.append({"path": current, "text": text})
+    for child in el:
+        items.extend(_walk_xml_tree(child, current))
+    return items
+
+
+def _cii_xml_from_content(content: str, format: EdiFormat) -> str:
+    """format='cii' -> content is raw XML text. format='zugferd' ->
+    content is a base64-encoded PDF; extract the embedded CII XML."""
+    if format == "cii":
+        return content
+    pdf_bytes = base64.b64decode(content)
+    _filename, xml_text = extract_cii_from_pdf(pdf_bytes)
+    return xml_text
 
 server = MCPServer(
     name="edi-invoicing",
@@ -32,48 +63,41 @@ server = MCPServer(
 )
 
 
-def _guarded(content: str):
-    check_size(content)
-    return parse_timeout()
-
-
 @server.tool()
-def parse_edi(content: str, format: Literal["edifact", "ubl"]) -> dict:
-    """Parse an EDIFACT INVOIC or UBL Invoice message and explain it
-    segment-by-segment (EDIFACT) or element-by-element (UBL)."""
+def parse_edi(content: str, format: EdiFormat) -> dict:
+    """Parse an EDIFACT INVOIC, UBL Invoice, or Factur-X/ZUGFeRD (CII)
+    message and explain it segment-by-segment (EDIFACT) or
+    element-by-element (UBL/CII). For format='zugferd', `content` must be
+    a base64-encoded PDF (the embedded CII XML is extracted automatically);
+    for format='cii', `content` is the raw CII XML text directly."""
     check_size(content)
+
+    def _parse() -> dict:
+        if format == "edifact":
+            result = edifact_tokenize(content)
+            from mcp_server.edifact import SEGMENT_DESCRIPTIONS
+
+            return {
+                "format": "edifact",
+                "segments": [
+                    {
+                        "tag": s.tag,
+                        "description": SEGMENT_DESCRIPTIONS.get(s.tag, "(not in curated set)"),
+                        "elements": s.elements,
+                    }
+                    for s in result.segments
+                ],
+            }
+        elif format == "ubl":
+            root = safe_ET.fromstring(content)
+            return {"format": "ubl", "elements": _walk_xml_tree(root)}
+        else:
+            xml_text = _cii_xml_from_content(content, format)
+            root = safe_ET.fromstring(xml_text)
+            return {"format": format, "elements": _walk_xml_tree(root)}
+
     try:
-        with parse_timeout():
-            if format == "edifact":
-                result = edifact_tokenize(content)
-                from mcp_server.edifact import SEGMENT_DESCRIPTIONS
-
-                return {
-                    "format": "edifact",
-                    "segments": [
-                        {
-                            "tag": s.tag,
-                            "description": SEGMENT_DESCRIPTIONS.get(s.tag, "(not in curated set)"),
-                            "elements": s.elements,
-                        }
-                        for s in result.segments
-                    ],
-                }
-            else:
-                root = safe_ET.fromstring(content)
-
-                def walk(el, path=""):
-                    tag = el.tag.split("}")[-1] if "}" in el.tag else el.tag
-                    current = f"{path}/{tag}"
-                    items = []
-                    text = (el.text or "").strip()
-                    if text:
-                        items.append({"path": current, "text": text})
-                    for child in el:
-                        items.extend(walk(child, current))
-                    return items
-
-                return {"format": "ubl", "elements": walk(root)}
+        return run_with_timeout(_parse)
     except ParseTimeout as exc:
         return {"error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - reported, not raised, to the model
@@ -81,20 +105,28 @@ def parse_edi(content: str, format: Literal["edifact", "ubl"]) -> dict:
 
 
 @server.tool()
-def validate_with_citation(content: str, format: Literal["edifact", "ubl"]) -> dict:
-    """Validate an EDIFACT INVOIC or UBL Invoice message. The verdict is
-    always deterministic (structural rules for EDIFACT, real XSD schema
-    validation for UBL) — never inferred by the model. Findings are
-    enriched with cited spec references from the Phase 3 RAG corpus when
-    the router service is available."""
+def validate_with_citation(content: str, format: EdiFormat) -> dict:
+    """Validate an EDIFACT INVOIC, UBL Invoice, or Factur-X/ZUGFeRD (CII)
+    message. The verdict is always deterministic (structural rules for
+    EDIFACT, real XSD schema validation for UBL/CII) — never inferred by
+    the model. Findings are enriched with cited spec references from the
+    Phase 3 RAG corpus when the router service is available. For
+    format='zugferd', `content` must be a base64-encoded PDF; for
+    format='cii', `content` is the raw CII XML text."""
     check_size(content)
+
+    def _validate():
+        if format == "edifact":
+            result = edifact_tokenize(content)
+            return edifact_validate_structure(result)
+        elif format == "ubl":
+            return ubl_validate(content)
+        else:
+            xml_text = _cii_xml_from_content(content, format)
+            return zugferd_validate_cii(xml_text)
+
     try:
-        with parse_timeout():
-            if format == "edifact":
-                result = edifact_tokenize(content)
-                findings = edifact_validate_structure(result)
-            else:
-                findings = ubl_validate(content)
+        findings = run_with_timeout(_validate)
     except ParseTimeout as exc:
         return {"error": str(exc)}
 
@@ -127,10 +159,12 @@ def map_format(
     if from_format != "edifact" or to_format != "ubl":
         return {"error": "only edifact -> ubl is supported in this pass"}
 
+    def _map():
+        result = edifact_tokenize(content)
+        return map_edifact_invoic_to_ubl(result)
+
     try:
-        with parse_timeout():
-            result = edifact_tokenize(content)
-            mapping = map_edifact_invoic_to_ubl(result)
+        mapping = run_with_timeout(_map)
     except ParseTimeout as exc:
         return {"error": str(exc)}
 
@@ -150,17 +184,30 @@ def map_format(
 
 @server.tool()
 def generate_synthetic_invoice(
-    format: Literal["edifact", "ubl"],
+    format: EdiFormat,
     num_lines: int = 2,
     seed: int | None = None,
 ) -> dict:
     """Generate a synthetic (Faker-sourced, entirely fictional) test
-    invoice in EDIFACT INVOIC or UBL Invoice format, for use in a test
-    suite. Never derived from real customer data. Pass `seed` for a
-    reproducible fixture."""
+    invoice in EDIFACT INVOIC, UBL Invoice, CII (raw XML), or ZUGFeRD/
+    Factur-X (PDF/A-3 with the CII XML embedded) format, for use in a
+    test suite. Never derived from real customer data. Pass `seed` for a
+    reproducible fixture. For format='zugferd' the response's `content`
+    is a base64-encoded PDF (encoding='base64'); a `cii_xml` field is
+    also included for convenience since the PDF's visual layer is a
+    blank placeholder — the XML is the authoritative content."""
     num_lines = max(1, min(num_lines, 20))
     if format == "edifact":
-        content = generate_synthetic_edifact_invoic(seed=seed, num_lines=num_lines)
-    else:
-        content = generate_synthetic_ubl_invoice(seed=seed, num_lines=num_lines)
-    return {"format": format, "content": content}
+        return {"format": format, "content": generate_synthetic_edifact_invoic(seed=seed, num_lines=num_lines)}
+    if format == "ubl":
+        return {"format": format, "content": generate_synthetic_ubl_invoice(seed=seed, num_lines=num_lines)}
+
+    xml_text, pdf_bytes = generate_synthetic_zugferd_invoice(seed=seed, num_lines=num_lines)
+    if format == "cii":
+        return {"format": format, "content": xml_text}
+    return {
+        "format": format,
+        "content": base64.b64encode(pdf_bytes).decode("ascii"),
+        "encoding": "base64",
+        "cii_xml": xml_text,
+    }
