@@ -1,11 +1,12 @@
 # Architecture
 
-A local, private coding assistant with two tiers:
+A local, private coding assistant with two tiers, plus an optional standalone UI over Tier 2:
 
 - **Tier 1 — Generalist**: everyday pair-programmer for any language, powered directly by a local model (Qwen3-Coder-30B-A3B via Ollama). No retrieval, no domain logic — must work standalone.
 - **Tier 2 — EDI/e-invoicing specialist**: RAG-grounded (not model-memory-grounded) domain layer that auto-activates when content warrants it, via an observable, overridable router. Cleanly separable from Tier 1 so a second domain can be added later without touching the core.
+- **Web UI (Phase 6)**: a standalone local web app giving Tier 2 a visual surface — invoice inspection/validation, a mapping workbench, synthetic test-data generation, and an audit/history dashboard — alongside the VS Code/Continue interface, not instead of it. Built after the Tier 2 tools exist, since it's a presentation layer over them.
 
-Everything runs on-device. No code, invoice data, PII, tax IDs, or proprietary mappings leave the machine.
+Everything runs on-device. No code, invoice data, PII, tax IDs, or proprietary mappings leave the machine. The web UI's database stores only metadata and audit records — never raw invoice content — preserving that guarantee.
 
 ## Component diagram
 
@@ -41,7 +42,21 @@ Everything runs on-device. No code, invoice data, PII, tax IDs, or proprietary m
                                               │  │ (untrusted parsing / │ │
                                               │  │ generated-code exec) │ │
                                               │  └──────────────────────┘ │
-                                              └──────────────────────────┘
+                                              └───────────▲──────────────┘
+                                                           │ same MCP tool calls
+                                                           │ (loopback, token-auth)
+┌──────────────────────── Standalone Web UI (Phase 6) ────┴──────────────────┐
+│                                                                              │
+│   Browser (React + Vite SPA) ──────► Fastify API (TS)                      │
+│   inspect / mapping workbench /      ├─ calls Python router + MCP server    │
+│   test-data gen / audit dashboard    │  (loopback, token-auth, same as       │
+│                                       │   Continue's calls)                  │
+│                                       └─ Drizzle ORM ──► PostgreSQL (Docker) │
+│                                          metadata & audit only —             │
+│                                          citations, verdicts, router         │
+│                                          decisions, job records.             │
+│                                          Never raw invoice content.          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Components
@@ -53,12 +68,17 @@ Everything runs on-device. No code, invoice data, PII, tax IDs, or proprietary m
 - **Vector store (Chroma, local/embedded)** — holds only the curated spec-document corpus (EDIFACT, UBL/PEPPOL, X12, UBL-TR, CII/ZUGFeRD spec text). Never holds real invoice payloads.
 - **MCP Server (Python)** — exposes the EDI toolset as typed, allowlisted tools (`parse_edi`, `validate_with_citation`, `map_format`, `generate_synthetic_invoice`) over the Model Context Protocol.
 - **Docker sandbox** — ephemeral, no network, read-only root fs, resource limits. Used for parsing untrusted payloads and executing any generated code that needs to actually run.
+- **Web UI — Fastify API (TS)** — standalone backend for the web app; the only component with direct Postgres access. Calls the same Python router/MCP server that Continue calls (same loopback+token-auth contract, no privileged bypass path). Owns request validation, session handling, and translating tool results into stored audit records.
+- **Web UI — React/Vite SPA** — browser frontend served by the Fastify API: invoice inspection/validation view, mapping workbench (diff-based, same review-before-apply principle as Continue), synthetic test-data generator form, and an audit/history dashboard over the Postgres metadata.
+- **PostgreSQL (Docker)** — local-only, stores metadata and audit trail (citation manifests, validation verdicts, router-decision logs, mapping/generation job records). Never stores raw invoice payload content by default; a real invoice's content lives only as long as the request that processed it.
 
 ## Data flow
 
 **Tier 1 (generalist):** editor → Continue → Ollama `/v1/chat/completions` → response streamed back. No Python service involved.
 
 **Tier 2 (specialist):** editor message/selection → Router Context Provider → Python router (cheap cascade) → if activated: retrieve cited spec chunks from Chroma + optionally invoke an MCP tool (deterministic parse/validate/map) → results injected as context/tool output → Ollama narrates using that grounded material → response shown with citations and a router-decision banner.
+
+**Web UI (Phase 6):** browser → Fastify API → same Python router/MCP server as Continue (parse/validate/map/generate, RAG retrieval) → Fastify writes a metadata/audit record (citations, verdict, job outcome — never raw payload content) to Postgres via Drizzle → response + citations rendered in the SPA. The web UI is a second client of the same Tier 2 backend, not a parallel implementation of it — all EDI logic still lives in the Python router/MCP server/format modules.
 
 ## Router design (hybrid cascade, cheap-first, extensible)
 
@@ -70,9 +90,11 @@ Everything runs on-device. No code, invoice data, PII, tax IDs, or proprietary m
 
 ## TypeScript / Python split
 
-**TypeScript** (editor-adjacent glue): Continue config, Router Context Provider, slash commands.
+**TypeScript** (editor-adjacent glue + web UI): Continue config, Router Context Provider, slash commands, the Fastify API + Drizzle/Postgres layer, the React/Vite SPA.
 
 **Python** (ground-truth logic): ingestion pipeline, router service, format modules (EDIFACT custom tokenizer, `pyx12` for X12, `lxml`/`xmlschema`/`isoschematron` for UBL/CII/PEPPOL/UBL-TR, `pikepdf` for ZUGFeRD/Factur-X), MCP server, Docker sandbox harness.
+
+The web UI doesn't change this split — it adds a second TypeScript-side *client* (Fastify API instead of Continue) of the same Python ground-truth logic, so EDI parsing/validation/mapping rules stay defined in exactly one place.
 
 See `threat-model.md` for the STRIDE analysis and OWASP LLM Top 10 mapping that inform these design choices.
 
@@ -83,3 +105,4 @@ See `threat-model.md` for the STRIDE analysis and OWASP LLM Top 10 mapping that 
 3. **Phase 3** — RAG grounding layer: spec sourcing, ingestion pipeline, Chroma corpus, router service, Router Context Provider — separable, off by default until wired in.
 4. **Phase 4** — EDI tool functions: MCP server, format modules starting with EDIFACT INVOIC ↔ UBL, expanding to X12/UBL-TR/CII/ZUGFeRD, Docker sandbox.
 5. **Phase 5** — synthetic test-data generator across formats, including ZUGFeRD PDF/A-3 assembly, never seeded from real payload values without confirmation.
+6. **Phase 6** — standalone web UI (`apps/web/` + `services/web-api/`): React/Vite frontend, Fastify+Drizzle API backed by a local Postgres (Docker), giving Tier 2 a visual surface (inspection, mapping workbench, test-data gen, audit dashboard) as a second client of the Phase 3/4/5 backend. Deliberately sequenced last — it's a presentation layer over tools that need to exist first.

@@ -8,6 +8,8 @@ echo "==> Ensuring Ollama is installed"
 brew list ollama >/dev/null 2>&1 || brew install ollama
 
 echo "==> Ensuring VS Code is installed"
+# Check if VS Code is installed, and install it if not
+command -v code >/dev/null || brew install visual-studio-code
 brew list --cask visual-studio-code >/dev/null 2>&1 || brew install --cask visual-studio-code
 
 echo "==> Starting Ollama"
