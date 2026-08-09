@@ -1,9 +1,10 @@
-# MCP server (Phases 4-5)
+# MCP server (Phases 4-6)
 
-Exposes the EDI/e-invoicing toolset as four typed, allowlisted MCP tools over
-stdio, launched by Continue via the `mcpServers:` entry in
-`apps/vscode-config/config.yaml`. No generic shell/code-execution tool
-exists — see `docs/threat-model.md` E1.
+Exposes the EDI/e-invoicing toolset as five typed, allowlisted MCP tools over
+stdio. Two clients launch it: Continue, via the `mcpServers:` entry in
+`apps/vscode-config/config.yaml`, and the Phase 6 web UI's Fastify API
+(`services/web-api`), which spawns it per call the same way. No generic
+shell/code-execution tool exists — see `docs/threat-model.md` E1.
 
 ## Setup
 
@@ -49,6 +50,14 @@ uv run edi-mcp-server
   (plus the raw `cii_xml` for convenience — the PDF's visual layer is a
   blank placeholder, not a rendered invoice); `format="cii"` returns just
   the XML.
+- **`apply_mapping_profile(content, field_mappings, from_format, to_format)`**
+  (Phase 6) — `map_format`'s user-driven sibling: instead of one hardcoded
+  correspondence table, applies field mappings a user built themselves (the
+  web UI's Mapping tab). Each entry is `{target_field, source:
+  {segment_index, element_index, component_index}}` — positional coordinates
+  into *this* message's parsed segments, so a mapping profile only works
+  against documents with the same segment shape as the sample it was built
+  from. EDIFACT → UBL only.
 
 ## Scope and known limitations
 

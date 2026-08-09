@@ -1,0 +1,237 @@
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.app-header h1 {
+  font-size: 28px;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 24px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.tabs button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.panel-description {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 20px;
+  max-width: 640px;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-row select,
+.form-row input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.form-row button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  height: 33px;
+}
+
+.form-row button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.content-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  margin-bottom: 16px;
+  resize: vertical;
+}
+
+.error-box {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border: 1px solid var(--error);
+  color: var(--error);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.result-box {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: var(--border);
+}
+
+.badge-valid {
+  background: color-mix(in srgb, var(--valid) 18%, transparent);
+  color: var(--valid);
+}
+
+.badge-invalid,
+.badge-error {
+  background: color-mix(in srgb, var(--invalid) 18%, transparent);
+  color: var(--invalid);
+}
+
+.result-box button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.content-block {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.findings-list,
+.citations-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+
+.finding {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.finding-error {
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+}
+
+.finding-warning {
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+}
+
+.finding-info {
+  background: color-mix(in srgb, var(--valid) 10%, transparent);
+}
+
+.finding-code {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.citations-list li {
+  font-size: 13px;
+  padding: 4px 0;
+  color: var(--muted);
+}
+
+.segments-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.segments-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.segments-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.mono-small {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}

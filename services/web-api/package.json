@@ -1,0 +1,30 @@
+{
+  "name": "web-api",
+  "version": "0.1.0",
+  "description": "Fastify backend for apps/web — the only component with direct Postgres access, calls the Python router/MCP server for all EDI logic.",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.11.3",
+    "postgres": "^3.4.9",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.11",
+    "typescript": "^7.0.2"
+  }
+}

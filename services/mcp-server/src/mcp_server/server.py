@@ -1,4 +1,4 @@
-"""EDI/e-invoicing MCP server: four typed, allowlisted tools.
+"""EDI/e-invoicing MCP server: five typed, allowlisted tools.
 
 No generic shell/code-execution tool exists here at all, per
 docs/threat-model.md E1. Every tool is a fixed Python function with a
@@ -16,7 +16,7 @@ from mcp_server.citations import fetch_citations
 from mcp_server.edifact import tokenize as edifact_tokenize
 from mcp_server.edifact import validate_structure as edifact_validate_structure
 from mcp_server.limits import ParseTimeout, check_size, run_with_timeout
-from mcp_server.mapping import map_edifact_invoic_to_ubl
+from mcp_server.mapping import apply_field_mapping, map_edifact_invoic_to_ubl
 from mcp_server.synth import (
     generate_synthetic_edifact_invoic,
     generate_synthetic_ubl_invoice,
@@ -178,6 +178,51 @@ def map_format(
         "ubl_xml": ubl_xml,
         "notes": mapping.notes,
         "unmapped_segments": mapping.unmapped_segments,
+        "validation": [{"level": f.level, "code": f.code, "message": f.message} for f in validation],
+    }
+
+
+@server.tool()
+def apply_mapping_profile(
+    content: str,
+    field_mappings: list[dict],
+    from_format: Literal["edifact"] = "edifact",
+    to_format: Literal["ubl"] = "ubl",
+) -> dict:
+    """Apply a user-specified field mapping (built via the web UI's
+    Mapping tab, not the automatic map_format correspondence table) to an
+    EDIFACT INVOIC message, producing UBL Invoice XML. Each entry in
+    field_mappings is {"target_field": str, "source": {"segment_index":
+    int, "element_index": int, "component_index": int}}; target_field is
+    either a header field name (invoice_id, issue_date, invoice_type_code,
+    currency, supplier_name, customer_name, payable_amount) or a line
+    field of the form "line_<N>.<subfield>" where subfield is one of
+    item_name/quantity/unit_code/line_extension_amount/price_amount. The
+    source indices are positional into this exact message's parsed
+    segments — a mapping profile is tied to documents with the same
+    segment shape as the sample it was built from."""
+    check_size(content)
+    if from_format != "edifact" or to_format != "ubl":
+        return {"error": "only edifact -> ubl is supported in this pass"}
+
+    def _apply():
+        result = edifact_tokenize(content)
+        return apply_field_mapping(result, field_mappings)
+
+    try:
+        mapping = run_with_timeout(_apply)
+    except ParseTimeout as exc:
+        return {"error": str(exc)}
+
+    if mapping.fields is None:
+        return {"error": "mapping incomplete", "notes": mapping.notes}
+
+    ubl_xml = build_invoice_xml(mapping.fields)
+    validation = ubl_validate(ubl_xml)
+
+    return {
+        "ubl_xml": ubl_xml,
+        "notes": mapping.notes,
         "validation": [{"level": f.level, "code": f.code, "message": f.message} for f in validation],
     }
 

@@ -12,6 +12,7 @@ docs/threat-model.md T3 (all repo writes go through the editor's own
 diff/apply UI, not this service).
 """
 
+import re
 from dataclasses import dataclass, field
 
 from mcp_server.edifact import ParseResult, Segment
@@ -167,3 +168,107 @@ def map_edifact_invoic_to_ubl(result: ParseResult) -> MappingResult:
         lines=lines,
     )
     return MappingResult(fields=fields, unmapped_segments=unmapped, notes=notes)
+
+
+# --- User-driven field mapping (Phase 6 mapping tool) -----------------------
+#
+# Unlike map_edifact_invoic_to_ubl above (a fixed, hardcoded correspondence
+# table), this lets a user specify their own source->target correspondences
+# via the web UI, saved as a "mapping profile". A source reference is
+# *positional*: (segment_index, element_index, component_index) into the
+# parsed segment list of the sample message the profile was built against.
+# That means a saved profile is tied to documents with the same segment
+# sequence/shape as that sample — not a general "any EDIFACT INVOIC" mapper.
+# Good enough for "map this one trading partner's consistent export format",
+# which is the common real-world case this tool targets.
+
+HEADER_TARGET_FIELDS = {
+    "invoice_id",
+    "issue_date",
+    "invoice_type_code",
+    "currency",
+    "supplier_name",
+    "customer_name",
+    "payable_amount",
+}
+LINE_SUBFIELDS = {"item_name", "quantity", "unit_code", "line_extension_amount", "price_amount"}
+_CCYYMMDD = re.compile(r"^\d{8}$")
+
+
+def _extract_value(segments: list[Segment], source: dict) -> str | None:
+    si, ei, ci = source.get("segment_index"), source.get("element_index"), source.get("component_index")
+    if si is None or ei is None or ci is None:
+        return None
+    if not (0 <= si < len(segments)):
+        return None
+    elements = segments[si].elements
+    if not (0 <= ei < len(elements)):
+        return None
+    component = elements[ei]
+    if not (0 <= ci < len(component)):
+        return None
+    return component[ci]
+
+
+def apply_field_mapping(result: ParseResult, field_mappings: list[dict]) -> MappingResult:
+    segments = result.segments
+    notes: list[str] = []
+    header: dict[str, str] = {}
+    lines_by_index: dict[int, dict[str, str]] = {}
+
+    for m in field_mappings:
+        target = m.get("target_field", "")
+        source = m.get("source")
+        if not target or not source:
+            continue
+        value = _extract_value(segments, source)
+        if value is None:
+            notes.append(f"{target}: source reference out of range for this document, skipped")
+            continue
+
+        if target in HEADER_TARGET_FIELDS:
+            if target == "issue_date" and _CCYYMMDD.match(value):
+                value = f"{value[0:4]}-{value[4:6]}-{value[6:8]}"
+            header[target] = value
+        elif target.startswith("line_"):
+            try:
+                idx_str, subfield = target[len("line_") :].split(".", 1)
+                idx = int(idx_str)
+            except ValueError:
+                notes.append(f"{target}: malformed line target field, skipped")
+                continue
+            if subfield not in LINE_SUBFIELDS:
+                notes.append(f"{target}: unknown line subfield {subfield!r}, skipped")
+                continue
+            lines_by_index.setdefault(idx, {"id": str(idx + 1)})[subfield] = value
+        else:
+            notes.append(f"{target}: unknown target field, skipped")
+
+    missing = [f for f in ("invoice_id", "issue_date", "supplier_name", "customer_name") if not header.get(f)]
+    if not lines_by_index:
+        missing.append("at least one line item")
+    if missing:
+        notes.append(f"could not build a complete UBL Invoice — missing: {', '.join(missing)}")
+        return MappingResult(fields=None, unmapped_segments=[], notes=notes)
+
+    ordered_lines = []
+    for idx in sorted(lines_by_index):
+        line = lines_by_index[idx]
+        line.setdefault("item_name", f"Line {idx + 1}")
+        line.setdefault("quantity", "1")
+        line.setdefault("unit_code", "EA")
+        line.setdefault("line_extension_amount", "0.00")
+        line.setdefault("price_amount", line["line_extension_amount"])
+        ordered_lines.append(line)
+
+    fields = InvoiceFields(
+        invoice_id=header["invoice_id"],
+        issue_date=header["issue_date"],
+        currency=header.get("currency", "EUR"),
+        invoice_type_code=header.get("invoice_type_code", "380"),
+        supplier_name=header["supplier_name"],
+        customer_name=header["customer_name"],
+        payable_amount=header.get("payable_amount", "0.00"),
+        lines=ordered_lines,
+    )
+    return MappingResult(fields=fields, unmapped_segments=[], notes=notes)
