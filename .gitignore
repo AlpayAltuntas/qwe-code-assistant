@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.env
+.env.*
+__pycache__/
+*.pyc
+.venv/
+venv/
+.chroma/
+services/router/.venv/
+services/mcp-server/.venv/
+*.sqlite3

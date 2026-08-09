@@ -1,0 +1,29 @@
+name: Local Assistant (Ollama / Qwen3-Coder)
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Qwen3-Coder-30B (chat)
+    provider: ollama
+    model: qwen3-coder:30b
+    apiBase: http://127.0.0.1:11434
+    roles:
+      - chat
+      - edit
+      - apply
+
+  - name: Qwen3-Coder-30B (autocomplete)
+    provider: ollama
+    model: qwen3-coder:30b
+    apiBase: http://127.0.0.1:11434
+    roles:
+      - autocomplete
+
+context:
+  - provider: code
+  - provider: docs
+  - provider: diff
+  - provider: terminal
+  - provider: problems
+  - provider: folder
+  - provider: codebase
