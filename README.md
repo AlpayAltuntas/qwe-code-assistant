@@ -42,7 +42,7 @@ All three should stream responses from the local model with no network activity 
 
 1. **Phase 1** — this repo's current state: generalist assistant, any language.
 2. **Phase 2** — harden the generalist: repo-scale workflows, review/test-gen commands, dev-up script.
-3. **Phase 3** — RAG grounding layer for EDI/e-invoicing specs, with an observable, overridable auto-router (`services/router/`).
+3. **Phase 3** (done) — RAG grounding layer for EDI/e-invoicing specs (`services/router/`), invoked via `@EDI Router` in Continue chat. See `docs/architecture.md` "Invocation note" for why this is manual rather than fully automatic.
 4. **Phase 4** — EDI tool functions: parse/explain, validate-with-citation, format mapping (`services/mcp-server/`).
 5. **Phase 5** — synthetic test-invoice generator across formats, including ZUGFeRD.
 6. **Phase 6** — standalone web UI: React/Vite frontend + Fastify/Drizzle API + local PostgreSQL, giving Tier 2 a visual surface (inspection, mapping workbench, test-data gen, audit dashboard) alongside VS Code (`apps/web/`, `services/web-api/`).

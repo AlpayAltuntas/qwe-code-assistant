@@ -1,0 +1,26 @@
+[project]
+name = "router"
+version = "0.1.0"
+description = "Hybrid-cascade domain router + RAG retrieval service for the EDI/e-invoicing specialist layer"
+readme = "README.md"
+authors = [
+    { name = "AlpayAltuntas", email = "alpaycanaltuntas@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "chromadb>=1.5.9",
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "lxml>=6.1.1",
+    "pydantic>=2.13.4",
+    "uvicorn[standard]>=0.52.1",
+]
+
+[project.scripts]
+router-serve = "router.__main__:main"
+router-ingest = "router.ingest:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"

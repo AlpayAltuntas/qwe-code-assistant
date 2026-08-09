@@ -12,3 +12,9 @@ venv/
 services/router/.venv/
 services/mcp-server/.venv/
 *.sqlite3
+
+# Router: fetched/ingested spec docs, vector index, logs, and the local
+# auth token are per-machine artifacts, not shared via git.
+services/router/data/*
+!services/router/data/.gitkeep
+services/router/.router-token

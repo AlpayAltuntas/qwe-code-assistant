@@ -27,3 +27,16 @@ context:
   - provider: problems
   - provider: folder
   - provider: codebase
+  # EDI/e-invoicing auto-router (Phase 3) — calls the local router service's
+  # /context endpoint on every message; returns [] (no-op) unless the
+  # router's hybrid cascade decides the message is EDI-relevant. Token is
+  # injected by scripts/setup.sh from services/router/.router-token, which
+  # is generated per-machine on first run and never committed.
+  - provider: http
+    name: "EDI Router"
+    params:
+      title: "EDI Router"
+      description: "EDI/e-invoicing spec grounding (auto-detects, or invoke manually)"
+      url: "http://127.0.0.1:8787/context"
+      headers:
+        Authorization: "Bearer __ROUTER_TOKEN__"
