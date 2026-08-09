@@ -18,3 +18,7 @@ services/mcp-server/.venv/
 services/router/data/*
 !services/router/data/.gitkeep
 services/router/.router-token
+
+# MCP server: fetched UBL XSD schemas — regenerate with
+# `uv run mcp-fetch-schemas` (see scripts/setup.sh).
+services/mcp-server/schemas/

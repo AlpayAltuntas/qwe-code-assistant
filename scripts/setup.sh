@@ -33,7 +33,9 @@ code --install-extension continue.continue
 echo "==> Checking uv (for the Python router service)"
 command -v uv >/dev/null || brew install uv
 
-ROUTER_DIR="$(dirname "$0")/../services/router"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROUTER_DIR="$PROJECT_ROOT/services/router"
+MCP_DIR="$PROJECT_ROOT/services/mcp-server"
 
 echo "==> Syncing router service dependencies"
 (cd "$ROUTER_DIR" && uv sync)
@@ -41,9 +43,16 @@ echo "==> Syncing router service dependencies"
 echo "==> Generating router auth token (if not already present)"
 ROUTER_TOKEN=$(cd "$ROUTER_DIR" && uv run python -c "from router.auth import ensure_token; print(ensure_token())")
 
+echo "==> Syncing MCP server dependencies"
+(cd "$MCP_DIR" && uv sync)
+
+echo "==> Fetching UBL XSD schemas for the MCP server's validator (if not already present)"
+[ -f "$MCP_DIR/schemas/maindoc/UBL-Invoice-2.1.xsd" ] || (cd "$MCP_DIR" && uv run mcp-fetch-schemas)
+
 echo "==> Installing Continue.dev config"
 mkdir -p "$HOME/.continue"
-sed "s/__ROUTER_TOKEN__/$ROUTER_TOKEN/" "$(dirname "$0")/../apps/vscode-config/config.yaml" > "$HOME/.continue/config.yaml"
+sed -e "s/__ROUTER_TOKEN__/$ROUTER_TOKEN/" -e "s#__PROJECT_ROOT__#$PROJECT_ROOT#" \
+  "$PROJECT_ROOT/apps/vscode-config/config.yaml" > "$HOME/.continue/config.yaml"
 
 echo "==> Done. Open this folder (or any project) in VS Code and open the Continue panel."
 echo ""
@@ -52,6 +61,8 @@ echo "must be running: in a separate terminal, run"
 echo "  cd services/router && uv run router-ingest fetch && uv run router-ingest promote --all && uv run router-ingest index"
 echo "once to build the spec corpus, then"
 echo "  cd services/router && uv run router-serve"
-echo "to start the router API before opening Continue. If you re-run this script after the"
-echo "router has already generated a token, re-run it again afterward so config.yaml picks up"
-echo "the same token value (or just replace __ROUTER_TOKEN__/the old token in ~/.continue/config.yaml by hand)."
+echo "to start the router API before opening Continue. The EDI Tools MCP server (Phase 4,"
+echo "parse/validate/map/generate) is launched by Continue itself via config.yaml — no"
+echo "separate process to start. If you re-run this script after the router has already"
+echo "generated a token, re-run it again afterward so config.yaml picks up the current"
+echo "token value (or just replace __ROUTER_TOKEN__/the old token in ~/.continue/config.yaml by hand)."

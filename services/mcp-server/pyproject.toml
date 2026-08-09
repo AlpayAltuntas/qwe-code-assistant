@@ -1,0 +1,26 @@
+[project]
+name = "mcp-server"
+version = "0.1.0"
+description = "EDI/e-invoicing toolset (parse/validate/map/generate) as typed MCP tools"
+readme = "README.md"
+authors = [
+    { name = "AlpayAltuntas", email = "alpaycanaltuntas@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "defusedxml>=0.7.1",
+    "faker>=40.36.0",
+    "httpx>=0.28.1",
+    "lxml>=6.1.1",
+    "mcp>=2.0.0",
+    "pydantic>=2.13.4",
+    "xmlschema>=4.3.2",
+]
+
+[project.scripts]
+mcp-fetch-schemas = "mcp_server.fetch_schemas:main"
+edi-mcp-server = "mcp_server.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"

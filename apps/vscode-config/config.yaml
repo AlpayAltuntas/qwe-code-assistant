@@ -40,3 +40,15 @@ context:
       url: "http://127.0.0.1:8787/context"
       headers:
         Authorization: "Bearer __ROUTER_TOKEN__"
+
+# Phase 4: EDI tool functions (parse/validate/map/generate), model-driven
+# tool calling via MCP — see services/mcp-server/. __PROJECT_ROOT__ is
+# substituted by scripts/setup.sh with this machine's absolute repo path.
+mcpServers:
+  - name: "EDI Tools"
+    command: uv
+    args:
+      - "run"
+      - "--directory"
+      - "__PROJECT_ROOT__/services/mcp-server"
+      - "edi-mcp-server"
