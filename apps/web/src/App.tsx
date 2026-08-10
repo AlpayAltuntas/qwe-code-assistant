@@ -1,42 +1,59 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { checkHealth } from "./api";
+import { AppShell, type Tab } from "./components/AppShell";
+import { PageHeader } from "./components/PageHeader";
 import { GenerateTab } from "./components/GenerateTab";
 import { InspectTab } from "./components/InspectTab";
 import { MappingTab } from "./components/MappingTab";
 import "./App.css";
 
-type Tab = "generate" | "inspect" | "mapping";
+const PAGE_COPY: Record<Tab, { title: string; description: string }> = {
+  generate: {
+    title: "Generate",
+    description:
+      "Create a synthetic, entirely fictional test invoice — never derived from real customer data.",
+  },
+  inspect: {
+    title: "Inspect & Validate",
+    description:
+      "Paste or upload a message to see it explained segment-by-segment and validated against real spec rules.",
+  },
+  mapping: {
+    title: "Mapping",
+    description:
+      "Build a reusable EDIFACT → UBL field mapping from a sample document, then apply it to others.",
+  },
+};
 
 function App() {
   const [tab, setTab] = useState<Tab>("generate");
+  const [apiConnected, setApiConnected] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      const ok = await checkHealth();
+      if (!cancelled) setApiConnected(ok);
+    }
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const copy = PAGE_COPY[tab];
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>EDI / e-invoicing toolkit</h1>
-        <p className="subtitle">
-          A visual surface over the same parse/validate/generate/map tools Continue calls — see{" "}
-          <code>docs/architecture.md</code>.
-        </p>
-      </header>
-
-      <nav className="tabs">
-        <button className={tab === "generate" ? "active" : ""} onClick={() => setTab("generate")}>
-          Generate
-        </button>
-        <button className={tab === "inspect" ? "active" : ""} onClick={() => setTab("inspect")}>
-          Inspect &amp; Validate
-        </button>
-        <button className={tab === "mapping" ? "active" : ""} onClick={() => setTab("mapping")}>
-          Mapping
-        </button>
-      </nav>
-
-      <main>
+    <AppShell activeTab={tab} onTabChange={setTab} apiConnected={apiConnected}>
+      <div className="page">
+        <PageHeader title={copy.title} description={copy.description} />
         {tab === "generate" && <GenerateTab />}
         {tab === "inspect" && <InspectTab />}
         {tab === "mapping" && <MappingTab />}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
