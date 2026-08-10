@@ -1,8 +1,8 @@
-"""EDI/e-invoicing MCP server: five typed, allowlisted tools.
+"""EDI/e-invoicing MCP server: six typed, allowlisted tools.
 
 No generic shell/code-execution tool exists here at all, per
 docs/threat-model.md E1. Every tool is a fixed Python function with a
-typed signature — the model can request one of exactly these four
+typed signature — the model can request one of exactly these
 operations, nothing else.
 """
 
@@ -16,7 +16,7 @@ from mcp_server.citations import fetch_citations
 from mcp_server.edifact import tokenize as edifact_tokenize
 from mcp_server.edifact import validate_structure as edifact_validate_structure
 from mcp_server.limits import ParseTimeout, check_size, run_with_timeout
-from mcp_server.mapping import apply_field_mapping, map_edifact_invoic_to_ubl
+from mcp_server.mapping import describe_source_fields, map_edifact_invoic_to_ubl, run_mapping
 from mcp_server.synth import (
     generate_synthetic_edifact_invoic,
     generate_synthetic_ubl_invoice,
@@ -24,7 +24,7 @@ from mcp_server.synth import (
 )
 from mcp_server.ubl import build_invoice_xml
 from mcp_server.ubl import validate as ubl_validate
-from mcp_server.zugferd import extract_cii_from_pdf
+from mcp_server.zugferd import assemble_pdf, extract_cii_from_pdf
 from mcp_server.zugferd import validate_cii as zugferd_validate_cii
 
 EdiFormat = Literal["edifact", "ubl", "cii", "zugferd"]
@@ -182,49 +182,119 @@ def map_format(
     }
 
 
+MappingSourceFormat = Literal["edifact", "ubl", "cii", "zugferd"]
+MappingTargetFormat = Literal["edifact", "ubl", "cii", "zugferd"]
+
+
+@server.tool()
+def describe_mapping_source_fields(content: str, format: MappingSourceFormat) -> dict:
+    """Analyzes a sample document (EDIFACT INVOIC, UBL Invoice, CII, or a
+    ZUGFeRD/Factur-X PDF) and returns the addressable source fields for
+    building a mapping profile in the web UI's Mapping tab: header-scope
+    fields (everything outside line-item groups) and a line-item
+    *template* (fields from the first detected line-item group only,
+    since a profile maps every line group the same relative way). Every
+    field, regardless of source format, is addressed the same way —
+    {parent_tag, tag, occurrence} — not raw document position, so
+    mappings built from these addresses generalize across documents
+    where line counts (or other counts) differ; see ir.py for how
+    EDIFACT's segment/element/component shape and XML's real nesting
+    both convert into one addressable tree. For format='zugferd',
+    `content` must be a base64-encoded PDF."""
+    check_size(content)
+
+    def _describe() -> dict:
+        if format == "zugferd":
+            xml_text = _cii_xml_from_content(content, format)
+            return describe_source_fields(xml_text, "cii")
+        return describe_source_fields(content, format)
+
+    try:
+        return run_with_timeout(_describe)
+    except ParseTimeout as exc:
+        return {"error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"could not parse content: {exc}"}
+
+
 @server.tool()
 def apply_mapping_profile(
     content: str,
     field_mappings: list[dict],
-    from_format: Literal["edifact"] = "edifact",
-    to_format: Literal["ubl"] = "ubl",
+    from_format: MappingSourceFormat = "edifact",
+    to_format: MappingTargetFormat = "ubl",
 ) -> dict:
-    """Apply a user-specified field mapping (built via the web UI's
-    Mapping tab, not the automatic map_format correspondence table) to an
-    EDIFACT INVOIC message, producing UBL Invoice XML. Each entry in
-    field_mappings is {"target_field": str, "source": {"segment_index":
-    int, "element_index": int, "component_index": int}}; target_field is
-    either a header field name (invoice_id, issue_date, invoice_type_code,
-    currency, supplier_name, customer_name, payable_amount) or a line
-    field of the form "line_<N>.<subfield>" where subfield is one of
-    item_name/quantity/unit_code/line_extension_amount/price_amount. The
-    source indices are positional into this exact message's parsed
-    segments — a mapping profile is tied to documents with the same
-    segment shape as the sample it was built from."""
+    """Apply a user-specified field mapping (built via describe_mapping_
+    source_fields + the web UI's Mapping tab, not the automatic map_format
+    correspondence table) to a document in any of EDIFACT/UBL/CII/ZUGFeRD,
+    producing output in any of those formats. Each entry in field_mappings
+    is {"target_field": str, "source": {...}}. `source` is either
+    {"kind": "field", "ref": {"parent_tag": str, "tag": str, "occurrence":
+    int}} — the same address shape regardless of source format: for
+    EDIFACT, parent_tag is the segment tag and tag is a synthesized
+    "e<element_index>.c<component_index>" position label; for UBL/CII,
+    parent_tag/tag are the containing/leaf XML element names (see ir.py) —
+    or {"kind": "constant", "value": str} (a fixed value, e.g. for a
+    field the source format doesn't carry). target_field is either a header field name
+    (invoice_id, issue_date, due_date, invoice_type_code, currency,
+    buyer_reference, order_reference, contract_reference,
+    payment_means_code, payment_id, payment_terms_note,
+    supplier_*/customer_* name+address+tax_id+email, tax_exclusive_amount,
+    tax_inclusive_amount, tax_total_amount, tax_category_id, tax_percent,
+    payable_amount) or a line field of the form "line.<subfield>"
+    (item_name, item_description, buyers_item_id, sellers_item_id,
+    quantity, unit_code, line_extension_amount, price_amount,
+    tax_category_id, tax_percent) — applied once per detected line-item
+    group in the actual input, so one definition produces however many
+    output lines the document actually has. Not every field has a home in
+    every target format (e.g. this EDIFACT builder has no address
+    fields) — fields dropped for that reason are reported in `notes`, not
+    silently discarded. For from_format='zugferd', `content` must be a
+    base64-encoded PDF; for to_format='zugferd', the response's `content`
+    is a base64-encoded PDF (with `cii_xml` also included, same
+    convention as generate_synthetic_invoice)."""
     check_size(content)
-    if from_format != "edifact" or to_format != "ubl":
-        return {"error": "only edifact -> ubl is supported in this pass"}
 
     def _apply():
-        result = edifact_tokenize(content)
-        return apply_field_mapping(result, field_mappings)
+        if from_format == "zugferd":
+            resolved_content = _cii_xml_from_content(content, from_format)
+            resolved_source_format = "cii"
+        else:
+            resolved_content = content
+            resolved_source_format = from_format
+
+        build_target_format = "cii" if to_format == "zugferd" else to_format
+        return run_mapping(resolved_content, resolved_source_format, field_mappings, build_target_format)
 
     try:
-        mapping = run_with_timeout(_apply)
+        result = run_with_timeout(_apply)
     except ParseTimeout as exc:
         return {"error": str(exc)}
 
-    if mapping.fields is None:
-        return {"error": "mapping incomplete", "notes": mapping.notes}
+    if result.output is None:
+        return {"error": "mapping incomplete", "notes": result.notes}
 
-    ubl_xml = build_invoice_xml(mapping.fields)
-    validation = ubl_validate(ubl_xml)
+    if to_format == "edifact":
+        parsed = edifact_tokenize(result.output)
+        validation = edifact_validate_structure(parsed)
+    elif to_format == "ubl":
+        validation = ubl_validate(result.output)
+    else:  # cii or zugferd — both produce CII XML first
+        validation = zugferd_validate_cii(result.output)
 
-    return {
-        "ubl_xml": ubl_xml,
-        "notes": mapping.notes,
+    response = {
+        "format": to_format,
+        "notes": result.notes,
         "validation": [{"level": f.level, "code": f.code, "message": f.message} for f in validation],
     }
+    if to_format == "zugferd":
+        pdf_bytes = assemble_pdf(result.output)
+        response["content"] = base64.b64encode(pdf_bytes).decode("ascii")
+        response["encoding"] = "base64"
+        response["cii_xml"] = result.output
+    else:
+        response["content"] = result.output
+    return response
 
 
 @server.tool()

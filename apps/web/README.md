@@ -12,11 +12,19 @@ npm run dev            # http://127.0.0.1:5173
 
 Requires `services/web-api` running (see its README) — the SPA has no functionality of its own without it.
 
-## Tabs
+## Design
+
+Sidebar-navigated (not tabs) over a small internal design system in
+`src/components/ui` (Button, Card, Badge, Alert, CodeBlock with
+copy-to-clipboard, Field variants), built on CSS custom-property tokens
+(`src/index.css`) with real light/dark theming — clean/technical aesthetic,
+one accent color, monospace for EDI/XML content.
+
+## Pages
 
 - **Generate** — form-driven synthetic test-invoice generation (EDIFACT, UBL, CII, ZUGFeRD/Factur-X) with download.
-- **Inspect & Validate** — paste or upload a message, see it parsed segment-by-segment / element-by-element, get a deterministic validation verdict with findings and spec citations.
-- **Mapping** — build an EDIFACT → UBL field mapping interactively from a sample document (per-target-field dropdowns, not a drag-line canvas — deliberately simpler), save it as a named reusable profile, and apply it to other documents with the same segment shape.
+- **Inspect & Validate** — drag-drop or paste a message, see it parsed segment-by-segment / element-by-element, get a deterministic validation verdict with findings and spec citations.
+- **Mapping** — build an EDIFACT → UBL field mapping interactively from a sample document: ~30 header fields (grouped: Invoice/Supplier/Customer/Payment/Totals & tax) and ~10 line-item fields, each mapped to either a source field (addressed by tag+occurrence, not raw position) or a typed-in constant value. Save as a named reusable profile, then apply it to *any* EDIFACT document — the line-item mapping is a template applied once per line-item group the target document actually has, so a profile built from a 2-line sample works unchanged on a 30-line invoice.
 
 Audit/history dashboard is a follow-up pass — the underlying data (`tool_invocations`) is already being written by every API call, just not surfaced in the UI yet.
 

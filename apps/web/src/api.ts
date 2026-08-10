@@ -64,29 +64,50 @@ export function validateInvoice(params: { content: string; format: EdiFormat }):
 }
 
 // --- Mapping tool ---
+//
+// Any of EDIFACT/UBL/CII/ZUGFeRD can be a mapping's source or target.
+// Source fields are addressed by tag/position + occurrence-of-that-shape
+// (not raw document position), so a mapping built from these addresses
+// keeps working on documents where line counts (or other counts) differ
+// — see mapping.py's module docstring for why. EDIFACT source fields
+// carry {tag, occurrence, element_index, component_index}; UBL/CII (XML)
+// source fields carry {parent_tag, tag, occurrence} instead — see
+// xmlmap.py. Line-item fields are a *template*: one relative address,
+// applied to every line-item group actually found on whatever document
+// the mapping gets applied to (so 3 mapped line subfields work whether
+// the target document has 1 line or 30).
 
+export type MappingFormat = "edifact" | "ubl" | "cii" | "zugferd";
+
+// One address shape for every source format — see
+// services/mcp-server/src/mcp_server/ir.py. For EDIFACT, parent_tag is
+// the segment tag and tag is a synthesized "e<i>.c<j>" position label;
+// for UBL/CII, both are real XML element names.
 export interface SourceField {
-  segmentIndex: number;
-  elementIndex: number;
-  componentIndex: number;
+  parent_tag: string;
+  tag: string;
+  occurrence: number;
   label: string;
   value: string;
 }
 
-export interface SourceRef {
-  segment_index: number;
-  element_index: number;
-  component_index: number;
-}
+export type FieldRef = {
+  parent_tag: string;
+  tag: string;
+  occurrence: number;
+};
+
+export type FieldSource = { kind: "field"; ref: FieldRef } | { kind: "constant"; value: string };
 
 export interface FieldMapping {
   target_field: string;
-  source: SourceRef;
+  source: FieldSource;
 }
 
 export interface TargetFieldDef {
   field: string;
   label: string;
+  group: string;
 }
 
 export interface LineSubfieldDef {
@@ -97,26 +118,32 @@ export interface LineSubfieldDef {
 export interface MappingProfile {
   id: number;
   name: string;
-  fromFormat: "edifact";
-  toFormat: "ubl";
+  fromFormat: MappingFormat;
+  toFormat: MappingFormat;
   fieldMappings: FieldMapping[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ApplyMappingResult {
-  ubl_xml?: string;
+  format?: MappingFormat;
+  content?: string;
+  encoding?: "base64";
+  cii_xml?: string;
   notes?: string[];
   validation?: { level: string; code: string; message: string }[];
   error?: string;
 }
 
-export function fetchSourceFields(content: string): Promise<{ fields: SourceField[] }> {
-  return postJson("/api/mapping-fields/source", { content, format: "edifact" });
+export function fetchSourceFields(
+  content: string,
+  format: MappingFormat,
+): Promise<{ header: SourceField[]; lineTemplate: SourceField[]; lineCount: number }> {
+  return postJson("/api/mapping-fields/source", { content, format });
 }
 
 export function fetchTargetFields(): Promise<{ header: TargetFieldDef[]; lineSubfields: LineSubfieldDef[] }> {
-  return request("/api/mapping-fields/target?format=ubl");
+  return request("/api/mapping-fields/target");
 }
 
 export function listMappingProfiles(): Promise<MappingProfile[]> {
@@ -125,8 +152,8 @@ export function listMappingProfiles(): Promise<MappingProfile[]> {
 
 export function createMappingProfile(params: {
   name: string;
-  fromFormat: "edifact";
-  toFormat: "ubl";
+  fromFormat: MappingFormat;
+  toFormat: MappingFormat;
   fieldMappings: FieldMapping[];
 }): Promise<MappingProfile> {
   return postJson("/api/mapping-profiles", params);
@@ -138,4 +165,13 @@ export function deleteMappingProfile(id: number): Promise<{ deleted: number }> {
 
 export function applyMappingProfile(id: number, content: string): Promise<ApplyMappingResult> {
   return postJson(`/api/mapping-profiles/${id}/apply`, { content });
+}
+
+export async function checkHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/health`);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

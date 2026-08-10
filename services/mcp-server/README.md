@@ -1,6 +1,6 @@
 # MCP server (Phases 4-6)
 
-Exposes the EDI/e-invoicing toolset as five typed, allowlisted MCP tools over
+Exposes the EDI/e-invoicing toolset as six typed, allowlisted MCP tools over
 stdio. Two clients launch it: Continue, via the `mcpServers:` entry in
 `apps/vscode-config/config.yaml`, and the Phase 6 web UI's Fastify API
 (`services/web-api`), which spawns it per call the same way. No generic
@@ -50,14 +50,37 @@ uv run edi-mcp-server
   (plus the raw `cii_xml` for convenience — the PDF's visual layer is a
   blank placeholder, not a rendered invoice); `format="cii"` returns just
   the XML.
+- **`describe_mapping_source_fields(content, format)`** (Phase 6) — analyzes
+  a sample (EDIFACT, UBL, CII, or a ZUGFeRD PDF) and returns addressable
+  source fields for the Mapping tab's field pickers: header-scope fields
+  (everything outside line-item groups) and a line-item *template* (fields
+  from the first detected line-item group only — a mapping applies the
+  same relative address to every line group a document actually has).
+  Every field, regardless of source format, is addressed the same way:
+  `{parent_tag, tag, occurrence}` — see `ir.py` for how EDIFACT's
+  segment/element/component shape and XML's real nesting both convert into
+  one shared tree before anything gets addressed.
 - **`apply_mapping_profile(content, field_mappings, from_format, to_format)`**
-  (Phase 6) — `map_format`'s user-driven sibling: instead of one hardcoded
-  correspondence table, applies field mappings a user built themselves (the
-  web UI's Mapping tab). Each entry is `{target_field, source:
-  {segment_index, element_index, component_index}}` — positional coordinates
-  into *this* message's parsed segments, so a mapping profile only works
-  against documents with the same segment shape as the sample it was built
-  from. EDIFACT → UBL only.
+  (Phase 6, any-to-any since Pass 3) — `map_format`'s user-driven sibling:
+  instead of one hardcoded correspondence table, applies field mappings a
+  user built themselves (the web UI's Mapping tab, via
+  `describe_mapping_source_fields`). `from_format`/`to_format` can each be
+  any of `edifact`/`ubl`/`cii`/`zugferd`, independently. Each field_mappings
+  entry is `{target_field, source}`, where `source` is either `{kind:
+  "field", ref: {parent_tag, tag, occurrence}}` (resolved from the input
+  document's own tree) or `{kind: "constant", value}` (a fixed value, for
+  data the source format doesn't carry). `target_field` covers ~30 header
+  fields (dates, references, payment terms/means, full addresses, tax IDs,
+  tax totals) and ~10 line fields (`line.<subfield>`, e.g. `line.item_name`)
+  — see `mapping.py`'s `HEADER_TARGET_FIELDS` / `LINE_SUBFIELDS` for the
+  full list; not every field has a home in every target format (this
+  EDIFACT builder has no address fields, for instance) — what got dropped
+  is reported in the response's `notes`, never silently discarded. Line
+  targets are applied once per detected line-item group in the *actual*
+  input document, so one mapping definition produces however many output
+  lines that document actually has — a mapping built from a 2-line sample
+  works unchanged on a 1-line or 30-line document, verified for all 12
+  meaningful format pairs.
 
 ## Scope and known limitations
 

@@ -49,6 +49,7 @@ def generate_synthetic_edifact_invoic(seed: int | None = None, num_lines: int = 
             ("MOA", [["203", f"{amount:.2f}"]]),
         ]
 
+    rows.append(("UNS", [["S"]]))  # Section Control: marks detail -> summary transition
     rows.append(("MOA", [["77", f"{total:.2f}"]]))
     body_count = len(rows) + 1  # +1 for UNT itself, matching this module's own validator convention
     rows.append(("UNT", [[str(body_count)], ["1"]]))
