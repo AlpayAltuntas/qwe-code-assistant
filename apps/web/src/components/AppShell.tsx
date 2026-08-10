@@ -1,12 +1,13 @@
-import { FileSearch, Layers, Sparkles, Waypoints } from "lucide-react";
+import { FilePlus2, FileSearch, Layers, Sparkles, Waypoints } from "lucide-react";
 import type { ReactNode } from "react";
 
-export type Tab = "generate" | "inspect" | "mapping";
+export type Tab = "generate" | "inspect" | "mapping" | "create";
 
 const NAV_ITEMS: { tab: Tab; label: string; icon: ReactNode }[] = [
   { tab: "generate", label: "Generate", icon: <Sparkles size={16} /> },
   { tab: "inspect", label: "Inspect & Validate", icon: <FileSearch size={16} /> },
   { tab: "mapping", label: "Mapping", icon: <Waypoints size={16} /> },
+  { tab: "create", label: "Create", icon: <FilePlus2 size={16} /> },
 ];
 
 interface AppShellProps {

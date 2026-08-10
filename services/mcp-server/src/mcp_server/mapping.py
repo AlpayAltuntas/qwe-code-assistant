@@ -19,7 +19,7 @@ import defusedxml.ElementTree as safe_ET
 
 from mcp_server import ir, xmlmap
 from mcp_server.edifact import EDIFACT_SUPPORTED_HEADER_FIELDS, EDIFACT_SUPPORTED_LINE_FIELDS, LINE_GROUP_IR_TAG
-from mcp_server.edifact import ParseResult, build_edifact_invoic
+from mcp_server.edifact import ParseResult, SEGMENT_DESCRIPTIONS, build_edifact_invoic
 from mcp_server.edifact import to_ir as edifact_to_ir
 from mcp_server.edifact import tokenize as edifact_tokenize
 from mcp_server.ubl import InvoiceFields, build_invoice_xml
@@ -300,6 +300,22 @@ def _build_scope_for_source(content: str, source_format: str) -> ir.Scope:
         raise ValueError(f"unsupported source format: {source_format!r}")
 
 
+def _add_segment_descriptions(fields: list[dict]) -> list[dict]:
+    """EDIFACT's synthetic "e<i>.c<j>" tags are precise but meaningless
+    to a human building a mapping — someone has to know that BGM's
+    second element is the invoice number, not the first. Prefixing the
+    segment's curated description (the same one parse_edi/validate show)
+    at least narrows "which segment is this" even though the exact
+    element/component still isn't semantically named — a real EDIFACT
+    schema of per-element meanings is out of scope for this pass."""
+    for f in fields:
+        description = SEGMENT_DESCRIPTIONS.get(f["parent_tag"])
+        segment_label = f"{f['parent_tag']} ({description})" if description else f["parent_tag"]
+        value = f["value"] or "(empty)"
+        f["label"] = f"{segment_label} / {f['tag']}#{f['occurrence']} = {value}"
+    return fields
+
+
 def describe_source_fields(content: str, source_format: str) -> dict:
     """Powers the mapping UI's field pickers: header-scope fields (from
     the whole message, minus line groups) and a line-item *template*
@@ -310,11 +326,16 @@ def describe_source_fields(content: str, source_format: str) -> dict:
     occurrence}; see ir.py for how EDIFACT's segment/element/component
     shape and XML's real nesting both convert into the same tree."""
     scope = _build_scope_for_source(content, source_format)
+    header = ir.flatten_fields(scope.header_leaves, scope.parent_map)
+    line_template = (
+        ir.flatten_fields(scope.line_group_leaves[0], scope.parent_map) if scope.line_group_leaves else []
+    )
+    if source_format == "edifact":
+        header = _add_segment_descriptions(header)
+        line_template = _add_segment_descriptions(line_template)
     return {
-        "header": ir.flatten_fields(scope.header_leaves, scope.parent_map),
-        "line_template": ir.flatten_fields(scope.line_group_leaves[0], scope.parent_map)
-        if scope.line_group_leaves
-        else [],
+        "header": header,
+        "line_template": line_template,
         "line_count": len(scope.line_group_leaves),
     }
 
@@ -390,7 +411,7 @@ def _resolve_values(content: str, source_format: str, field_mappings: list[dict]
     return header, lines, notes
 
 
-def _build_target(header: dict, lines: list[dict], target_format: str) -> tuple[str | None, list[str]]:
+def build_target(header: dict, lines: list[dict], target_format: str) -> tuple[str | None, list[str]]:
     """Format-agnostic target construction from resolved canonical
     header/line dicts. Returns (output_text, notes) — for
     target_format='zugferd' this returns CII XML text; wrapping it into a
@@ -421,7 +442,8 @@ def _build_target(header: dict, lines: list[dict], target_format: str) -> tuple[
             f"{', '.join(sorted(unsupported_line_fields))}"
         )
 
-    for line in lines:
+    for idx, line in enumerate(lines):
+        line.setdefault("id", str(idx + 1))
         line.setdefault("quantity", "1")
         line.setdefault("unit_code", "EA")
         line.setdefault("line_extension_amount", "0.00")
@@ -489,5 +511,5 @@ def run_mapping(content: str, source_format: str, field_mappings: list[dict], ta
     resolve canonical field values from `content` (in `source_format`)
     using `field_mappings`, then render them as `target_format`."""
     header, lines, resolve_notes = _resolve_values(content, source_format, field_mappings)
-    output, build_notes = _build_target(header, lines, target_format)
+    output, build_notes = build_target(header, lines, target_format)
     return MappingRunResult(output=output, notes=resolve_notes + build_notes)

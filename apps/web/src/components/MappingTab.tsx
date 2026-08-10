@@ -1,7 +1,19 @@
-import { ChevronDown, Download, Layers, PlayCircle, Save, Trash2, Upload, Waypoints } from "lucide-react";
+import {
+  ChevronDown,
+  Download,
+  FilePlus2,
+  Layers,
+  PlayCircle,
+  PlusCircle,
+  Save,
+  Trash2,
+  Upload,
+  Waypoints,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyMappingProfile,
+  buildDocument,
   createMappingProfile,
   deleteMappingProfile,
   fetchSourceFields,
@@ -44,6 +56,42 @@ function downloadBlob(filename: string, content: string, mimeType: string, isBas
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+const FORMAT_FILE_INFO: Record<MappingFormat, { ext: string; mimeType: string }> = {
+  edifact: { ext: "edi", mimeType: "application/edifact" },
+  ubl: { ext: "xml", mimeType: "application/xml" },
+  cii: { ext: "xml", mimeType: "application/xml" },
+  zugferd: { ext: "pdf", mimeType: "application/pdf" },
+};
+
+let nextManualLineKey = 1;
+
+interface ManualLineRow {
+  key: number;
+  values: Record<string, string>;
+}
+
+function emptyManualLine(): ManualLineRow {
+  return { key: nextManualLineKey++, values: {} };
+}
+
+/** A saved mapping's constant-sourced fields need no source document at
+ * all — carry them over as a starting point when switching into manual
+ * entry, so the user only has to fill in what the mapping couldn't
+ * already fix. */
+function constantsFromProfile(profile: MappingProfile): { header: Record<string, string>; line: Record<string, string> } {
+  const header: Record<string, string> = {};
+  const line: Record<string, string> = {};
+  for (const m of profile.fieldMappings) {
+    if (m.source.kind !== "constant") continue;
+    if (m.target_field.startsWith("line.")) {
+      line[m.target_field.slice("line.".length)] = m.source.value;
+    } else {
+      header[m.target_field] = m.source.value;
+    }
+  }
+  return { header, line };
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -196,6 +244,9 @@ export function MappingTab() {
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [applyContent, setApplyContent] = useState("");
   const [applyResult, setApplyResult] = useState<ApplyMappingResult | null>(null);
+  const [applyMode, setApplyMode] = useState<"document" | "manual">("document");
+  const [manualHeader, setManualHeader] = useState<Record<string, string>>({});
+  const [manualLines, setManualLines] = useState<ManualLineRow[]>([emptyManualLine()]);
 
   const [loadingFields, setLoadingFields] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -218,6 +269,24 @@ export function MappingTab() {
     setLineSources({});
     setSampleContent("");
   }, [fromFormat]);
+
+  // Selecting a different saved mapping invalidates whatever apply
+  // state (document or manual entry) was built against the previous one.
+  useEffect(() => {
+    const profile = profiles.find((p) => p.id === selectedProfileId);
+    setApplyContent("");
+    setApplyResult(null);
+    setApplyMode("document");
+    if (profile) {
+      const { header, line } = constantsFromProfile(profile);
+      setManualHeader(header);
+      setManualLines([{ key: nextManualLineKey++, values: line }]);
+    } else {
+      setManualHeader({});
+      setManualLines([emptyManualLine()]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProfileId]);
 
   async function refreshProfiles() {
     try {
@@ -300,12 +369,21 @@ export function MappingTab() {
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? null;
 
+  // A profile whose fromFormat matches what's currently loaded in step 1
+  // shares that same document — no reason to make the user paste the
+  // same source document twice just to apply the mapping they built it
+  // for. Editing either box edits the same underlying state; only a
+  // profile expecting a different format falls back to its own content.
+  const sampleReusable = selectedProfile !== null && selectedProfile.fromFormat === fromFormat;
+  const effectiveApplyContent = sampleReusable ? sampleContent : applyContent;
+  const setEffectiveApplyContent = sampleReusable ? setSampleContent : setApplyContent;
+
   async function handleApply() {
     if (!selectedProfileId) {
       setError("Pick a saved mapping first.");
       return;
     }
-    if (!applyContent.trim()) {
+    if (!effectiveApplyContent.trim()) {
       setError("Provide a document to apply the mapping to.");
       return;
     }
@@ -313,7 +391,59 @@ export function MappingTab() {
     setError(null);
     setApplyResult(null);
     try {
-      setApplyResult(await applyMappingProfile(selectedProfileId, applyContent));
+      setApplyResult(await applyMappingProfile(selectedProfileId, effectiveApplyContent));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  function setManualHeaderField(field: string, value: string) {
+    setManualHeader((prev) => {
+      if (value) return { ...prev, [field]: value };
+      const { [field]: _omit, ...rest } = prev;
+      return rest;
+    });
+  }
+
+  function setManualLineField(key: number, subfield: string, value: string) {
+    setManualLines((prev) =>
+      prev.map((line) => {
+        if (line.key !== key) return line;
+        const values = value
+          ? { ...line.values, [subfield]: value }
+          : Object.fromEntries(Object.entries(line.values).filter(([k]) => k !== subfield));
+        return { ...line, values };
+      }),
+    );
+  }
+
+  function addManualLine() {
+    setManualLines((prev) => [...prev, emptyManualLine()]);
+  }
+
+  function removeManualLine(key: number) {
+    setManualLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev));
+  }
+
+  async function handleManualGenerate() {
+    if (!selectedProfile) {
+      setError("Pick a saved mapping first.");
+      return;
+    }
+    setApplying(true);
+    setError(null);
+    setApplyResult(null);
+    try {
+      const nonEmptyLines = manualLines.map((l) => l.values).filter((v) => Object.keys(v).length > 0);
+      setApplyResult(
+        await buildDocument({
+          header: manualHeader,
+          lines: nonEmptyLines,
+          toFormat: selectedProfile.toFormat,
+        }),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -322,14 +452,10 @@ export function MappingTab() {
   }
 
   function handleDownloadResult() {
-    if (!applyResult?.content) return;
-    const ext = applyResult.format === "zugferd" ? "pdf" : "xml";
+    if (!applyResult?.content || !applyResult.format) return;
+    const { ext, mimeType } = FORMAT_FILE_INFO[applyResult.format];
     const filename = `mapped-invoice.${ext}`;
-    if (applyResult.encoding === "base64") {
-      downloadBlob(filename, applyResult.content, "application/pdf", true);
-    } else {
-      downloadBlob(filename, applyResult.content, "text/plain");
-    }
+    downloadBlob(filename, applyResult.content, mimeType, applyResult.encoding === "base64");
   }
 
   const hasFields = headerFields.length > 0;
@@ -503,24 +629,129 @@ export function MappingTab() {
           <div className="section-heading">Apply a saved mapping</div>
           {!selectedProfileId && <p className="hint">Select a mapping above first.</p>}
           {selectedProfile && (
-            <DocumentInput
-              format={selectedProfile.fromFormat}
-              value={applyContent}
-              onChange={setApplyContent}
-              placeholder={`Paste a ${selectedProfile.fromFormat} document to convert — any number of line items…`}
-            />
+            <>
+              <div className="mode-toggle" style={{ marginBottom: 14 }}>
+                <button
+                  type="button"
+                  className={applyMode === "document" ? "active" : ""}
+                  onClick={() => setApplyMode("document")}
+                >
+                  From a document
+                </button>
+                <button
+                  type="button"
+                  className={applyMode === "manual" ? "active" : ""}
+                  onClick={() => setApplyMode("manual")}
+                >
+                  Enter values manually
+                </button>
+              </div>
+
+              {applyMode === "document" ? (
+                <>
+                  {sampleReusable && sampleContent && (
+                    <p className="hint" style={{ marginTop: -4 }}>
+                      Reusing the sample document loaded in step 1 — edit it below if you want to apply
+                      to something else.
+                    </p>
+                  )}
+                  <DocumentInput
+                    format={selectedProfile.fromFormat}
+                    value={effectiveApplyContent}
+                    onChange={setEffectiveApplyContent}
+                    placeholder={`Paste a ${selectedProfile.fromFormat} document to convert — any number of line items…`}
+                  />
+                  <div className="form-actions">
+                    <Button variant="primary" icon={<PlayCircle size={15} />} loading={applying} onClick={handleApply}>
+                      Apply mapping
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="hint" style={{ marginTop: -4 }}>
+                    No source document — type the values directly and build a {selectedProfile.toFormat} document.
+                    {Object.keys(manualHeader).length > 0 || Object.values(manualLines[0]?.values ?? {}).length > 0
+                      ? " Fields already fixed to a constant in this mapping are pre-filled below."
+                      : ""}
+                  </p>
+                  {targetDefs && (
+                    <>
+                      {groupedHeaderFields.map(([group, fields]) => (
+                        <div key={group} className="field-group">
+                          <div className="field-group-title">{group}</div>
+                          <div className="table-scroll">
+                            <table className="table">
+                              <tbody>
+                                {fields.map((t) => (
+                                  <tr key={t.field}>
+                                    <td style={{ width: "32%" }}>{t.label}</td>
+                                    <td>
+                                      <input
+                                        className="input"
+                                        value={manualHeader[t.field] ?? ""}
+                                        onChange={(e) => setManualHeaderField(t.field, e.target.value)}
+                                      />
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+
+                      <div className="field-group-title">Line items</div>
+                      <div className="line-item-list">
+                        {manualLines.map((line, idx) => (
+                          <div key={line.key} className="line-item-card">
+                            <div className="line-item-card-header">
+                              <span className="line-item-index">Line {idx + 1}</span>
+                              {manualLines.length > 1 && (
+                                <button
+                                  className="icon-btn"
+                                  type="button"
+                                  title="Remove line"
+                                  onClick={() => removeManualLine(line.key)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                            <div className="line-item-grid">
+                              {targetDefs.lineSubfields.map((s) => (
+                                <TextField
+                                  key={s.subfield}
+                                  label={s.label}
+                                  value={line.values[s.subfield] ?? ""}
+                                  onChange={(e) => setManualLineField(line.key, s.subfield, e.target.value)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="form-actions">
+                        <Button size="sm" icon={<PlusCircle size={14} />} onClick={addManualLine}>
+                          Add line item
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                  <div className="form-actions">
+                    <Button
+                      variant="primary"
+                      icon={<FilePlus2 size={15} />}
+                      loading={applying}
+                      onClick={handleManualGenerate}
+                    >
+                      Generate document
+                    </Button>
+                  </div>
+                </>
+              )}
+            </>
           )}
-          <div className="form-actions">
-            <Button
-              variant="primary"
-              icon={<PlayCircle size={15} />}
-              loading={applying}
-              disabled={!selectedProfileId}
-              onClick={handleApply}
-            >
-              Apply mapping
-            </Button>
-          </div>
 
           {applyResult && (
             <div style={{ marginTop: 20 }}>
@@ -540,11 +771,9 @@ export function MappingTab() {
                     <div className="result-header-left">
                       {applyResult.format && <Badge variant="info">{applyResult.format}</Badge>}
                     </div>
-                    {applyResult.encoding === "base64" && (
-                      <Button size="sm" icon={<Download size={14} />} onClick={handleDownloadResult}>
-                        Download
-                      </Button>
-                    )}
+                    <Button size="sm" icon={<Download size={14} />} onClick={handleDownloadResult}>
+                      Download {applyResult.format ? FORMAT_FILE_INFO[applyResult.format].ext.toUpperCase() : "file"}
+                    </Button>
                   </div>
                   {applyResult.encoding === "base64" ? (
                     <>

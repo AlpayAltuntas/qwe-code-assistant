@@ -35,12 +35,13 @@ GRANT USAGE, SELECT ON SEQUENCE mapping_profiles_id_seq TO qwe_web_api;
 - `POST /api/generate` — `{format, numLines, seed?}` → calls `generate_synthetic_invoice`
 - `POST /api/parse` — `{content, format}` → calls `parse_edi`
 - `POST /api/validate` — `{content, format}` → calls `validate_with_citation`
-- `POST /api/mapping-fields/source` — `{content, format: "edifact"}` → calls `describe_mapping_source_fields`, returns `{header, lineTemplate, lineCount}` where each field is `{tag, occurrence, element_index, component_index, label, value}` — addressed by tag+occurrence, not raw position, for the Mapping tab's dropdowns
-- `GET /api/mapping-fields/target?format=ubl` — static list of ~30 header + ~10 line mappable UBL target fields, grouped (`{field, label, group}`) for the UI
-- `GET /api/mapping-profiles`, `POST /api/mapping-profiles`, `GET/PUT/DELETE /api/mapping-profiles/:id` — saved mapping CRUD
+- `POST /api/mapping-fields/source` — `{content, format}` (`format` any of `edifact`/`ubl`/`cii`/`zugferd`) → calls `describe_mapping_source_fields`, returns `{header, lineTemplate, lineCount}` where each field is `{parent_tag, tag, occurrence, label, value}` — one address shape regardless of source format, addressed by tag+occurrence rather than raw position, for the Mapping tab's dropdowns (see `services/mcp-server/src/mcp_server/ir.py`)
+- `GET /api/mapping-fields/target` — static list of ~30 header + ~10 line canonical target fields, grouped (`{field, label, group}`) for the UI; shared by both the Mapping tab and the Create tab, and by every target format (not format-specific — a given field's `notes` at apply/build time say whether it landed)
+- `GET /api/mapping-profiles`, `POST /api/mapping-profiles`, `GET/PUT/DELETE /api/mapping-profiles/:id` — saved mapping CRUD, any of EDIFACT/UBL/CII/ZUGFeRD as `fromFormat`/`toFormat`
 - `POST /api/mapping-profiles/:id/apply` — `{content}` → calls `apply_mapping_profile` with the saved profile's field mappings
+- `POST /api/documents` — `{header, lines, toFormat}` → calls `build_document`; builds a target document directly from field values the user typed in (Create tab), with no source document or field mapping involved — `header` and `lines[]` are keyed by the same canonical field/subfield names as the mapping target catalog
 
-Every call to `generate`/`parse`/`validate`/mapping-apply writes one row to `tool_invocations` (tool, format, verdict, short summary) — metadata only, never the submitted content (docs/threat-model.md I1).
+Every call to `generate`/`parse`/`validate`/mapping-apply/`documents` writes one row to `tool_invocations` (tool, format, short summary) — metadata only, never the submitted content (docs/threat-model.md I1).
 
 ## How it reaches the EDI tools
 

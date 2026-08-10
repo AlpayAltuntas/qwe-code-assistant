@@ -1,6 +1,6 @@
 # MCP server (Phases 4-6)
 
-Exposes the EDI/e-invoicing toolset as six typed, allowlisted MCP tools over
+Exposes the EDI/e-invoicing toolset as seven typed, allowlisted MCP tools over
 stdio. Two clients launch it: Continue, via the `mcpServers:` entry in
 `apps/vscode-config/config.yaml`, and the Phase 6 web UI's Fastify API
 (`services/web-api`), which spawns it per call the same way. No generic
@@ -81,6 +81,19 @@ uv run edi-mcp-server
   lines that document actually has — a mapping built from a 2-line sample
   works unchanged on a 1-line or 30-line document, verified for all 12
   meaningful format pairs.
+- **`build_document(header, lines, to_format)`** (Phase 6) —
+  `apply_mapping_profile`'s sibling for when there's no source document to
+  map from at all: builds a target document directly from field values the
+  caller supplies. `header` is `{target_field: value}` and `lines` is a list
+  of `{subfield: value}` dicts — the same canonical field vocabulary as
+  `apply_mapping_profile`'s `target_field`, just supplied directly instead
+  of resolved from a source tree. Shares `mapping.py`'s `build_target` (the
+  format-agnostic target-construction step) with `apply_mapping_profile`,
+  so required-field checks, per-target-format field support, and line
+  defaulting behave identically between "map from a document" and "type it
+  in by hand". Same response shape as `apply_mapping_profile` (`format`,
+  `notes`, `validation`, `content`, plus `encoding`/`cii_xml` for
+  `to_format="zugferd"`).
 
 ## Scope and known limitations
 

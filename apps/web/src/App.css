@@ -538,6 +538,41 @@
   color: var(--danger);
 }
 
+/* Create tool: repeatable line-item cards */
+.line-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.line-item-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px 14px 4px;
+}
+
+.line-item-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.line-item-index {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.line-item-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px 12px;
+}
+
 .divider {
   height: 1px;
   background: var(--border);

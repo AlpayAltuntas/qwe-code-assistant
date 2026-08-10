@@ -33,8 +33,8 @@ export interface ValidateResponse {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: { ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -165,6 +165,31 @@ export function deleteMappingProfile(id: number): Promise<{ deleted: number }> {
 
 export function applyMappingProfile(id: number, content: string): Promise<ApplyMappingResult> {
   return postJson(`/api/mapping-profiles/${id}/apply`, { content });
+}
+
+// --- Create tool ---
+//
+// Build a document directly from field values, with no source document
+// to map from (that's the Mapping tab's job) — see build_document in
+// services/mcp-server/src/mcp_server/server.py. Uses the same canonical
+// header/line field vocabulary as the Mapping tab's target fields.
+
+export interface BuildDocumentResult {
+  format?: MappingFormat;
+  content?: string;
+  encoding?: "base64";
+  cii_xml?: string;
+  notes?: string[];
+  validation?: { level: string; code: string; message: string }[];
+  error?: string;
+}
+
+export function buildDocument(params: {
+  header: Record<string, string>;
+  lines: Record<string, string>[];
+  toFormat: MappingFormat;
+}): Promise<BuildDocumentResult> {
+  return postJson("/api/documents", params);
 }
 
 export async function checkHealth(): Promise<boolean> {

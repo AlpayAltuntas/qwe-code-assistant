@@ -16,7 +16,7 @@ from mcp_server.citations import fetch_citations
 from mcp_server.edifact import tokenize as edifact_tokenize
 from mcp_server.edifact import validate_structure as edifact_validate_structure
 from mcp_server.limits import ParseTimeout, check_size, run_with_timeout
-from mcp_server.mapping import describe_source_fields, map_edifact_invoic_to_ubl, run_mapping
+from mcp_server.mapping import build_target, describe_source_fields, map_edifact_invoic_to_ubl, run_mapping
 from mcp_server.synth import (
     generate_synthetic_edifact_invoic,
     generate_synthetic_ubl_invoice,
@@ -50,6 +50,34 @@ def _cii_xml_from_content(content: str, format: EdiFormat) -> str:
     pdf_bytes = base64.b64decode(content)
     _filename, xml_text = extract_cii_from_pdf(pdf_bytes)
     return xml_text
+
+
+def _finalize_target_output(output: str, notes: list[str], to_format: "MappingTargetFormat") -> dict:
+    """Shared by apply_mapping_profile and build_document: validates the
+    built target document and shapes the response (including the
+    zugferd PDF-assembly step), so both entry points return the exact
+    same {format, notes, validation, content, ...} shape."""
+    if to_format == "edifact":
+        parsed = edifact_tokenize(output)
+        validation = edifact_validate_structure(parsed)
+    elif to_format == "ubl":
+        validation = ubl_validate(output)
+    else:  # cii or zugferd — both produce CII XML first
+        validation = zugferd_validate_cii(output)
+
+    response = {
+        "format": to_format,
+        "notes": notes,
+        "validation": [{"level": f.level, "code": f.code, "message": f.message} for f in validation],
+    }
+    if to_format == "zugferd":
+        pdf_bytes = assemble_pdf(output)
+        response["content"] = base64.b64encode(pdf_bytes).decode("ascii")
+        response["encoding"] = "base64"
+        response["cii_xml"] = output
+    else:
+        response["content"] = output
+    return response
 
 server = MCPServer(
     name="edi-invoicing",
@@ -274,27 +302,43 @@ def apply_mapping_profile(
     if result.output is None:
         return {"error": "mapping incomplete", "notes": result.notes}
 
-    if to_format == "edifact":
-        parsed = edifact_tokenize(result.output)
-        validation = edifact_validate_structure(parsed)
-    elif to_format == "ubl":
-        validation = ubl_validate(result.output)
-    else:  # cii or zugferd — both produce CII XML first
-        validation = zugferd_validate_cii(result.output)
+    return _finalize_target_output(result.output, result.notes, to_format)
 
-    response = {
-        "format": to_format,
-        "notes": result.notes,
-        "validation": [{"level": f.level, "code": f.code, "message": f.message} for f in validation],
-    }
-    if to_format == "zugferd":
-        pdf_bytes = assemble_pdf(result.output)
-        response["content"] = base64.b64encode(pdf_bytes).decode("ascii")
-        response["encoding"] = "base64"
-        response["cii_xml"] = result.output
-    else:
-        response["content"] = result.output
-    return response
+
+@server.tool()
+def build_document(
+    header: dict,
+    lines: list[dict],
+    to_format: MappingTargetFormat,
+) -> dict:
+    """Build a document directly from field values — no source document
+    or field mapping required. Use this when the user wants to create an
+    EDIFACT/UBL/CII/ZUGFeRD document by entering the data themselves
+    rather than mapping it from an existing document (that's
+    apply_mapping_profile's job). `header` is a dict of header field
+    values keyed by the same target_field names apply_mapping_profile
+    documents (invoice_id, issue_date, supplier_name, ...); `lines` is a
+    list of dicts, one per line item, each keyed by the line subfield
+    names (item_name, quantity, price_amount, ...) without the "line."
+    prefix. Not every field has a home in every target format — fields
+    with nowhere to go are reported in the response's `notes`, not
+    silently dropped. For to_format='zugferd', the response's `content`
+    is a base64-encoded PDF (with `cii_xml` also included, same
+    convention as generate_synthetic_invoice)."""
+
+    def _build():
+        build_to_format = "cii" if to_format == "zugferd" else to_format
+        return build_target(header, lines, build_to_format)
+
+    try:
+        output, notes = run_with_timeout(_build)
+    except ParseTimeout as exc:
+        return {"error": str(exc)}
+
+    if output is None:
+        return {"error": "could not build document", "notes": notes}
+
+    return _finalize_target_output(output, notes, to_format)
 
 
 @server.tool()

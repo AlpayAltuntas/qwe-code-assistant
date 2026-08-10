@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { checkHealth } from "./api";
 import { AppShell, type Tab } from "./components/AppShell";
 import { PageHeader } from "./components/PageHeader";
+import { CreateTab } from "./components/CreateTab";
 import { GenerateTab } from "./components/GenerateTab";
 import { InspectTab } from "./components/InspectTab";
 import { MappingTab } from "./components/MappingTab";
@@ -21,7 +22,12 @@ const PAGE_COPY: Record<Tab, { title: string; description: string }> = {
   mapping: {
     title: "Mapping",
     description:
-      "Build a reusable EDIFACT → UBL field mapping from a sample document, then apply it to others.",
+      "Build a reusable field mapping from a sample document, then apply it to others — any of EDIFACT/UBL/CII/ZUGFeRD to any other.",
+  },
+  create: {
+    title: "Create",
+    description:
+      "Build a document by entering field values directly — no source document required.",
   },
 };
 
@@ -52,6 +58,7 @@ function App() {
         {tab === "generate" && <GenerateTab />}
         {tab === "inspect" && <InspectTab />}
         {tab === "mapping" && <MappingTab />}
+        {tab === "create" && <CreateTab />}
       </div>
     </AppShell>
   );
