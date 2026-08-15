@@ -1,15 +1,4 @@
-import {
-  ChevronDown,
-  Download,
-  FilePlus2,
-  Layers,
-  PlayCircle,
-  PlusCircle,
-  Save,
-  Trash2,
-  Upload,
-  Waypoints,
-} from "lucide-react";
+import { Download, FilePlus2, PlayCircle, PlusCircle, Save, Trash2, Upload, Waypoints } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyMappingProfile,
@@ -21,7 +10,6 @@ import {
   listMappingProfiles,
   type ApplyMappingResult,
   type FieldMapping,
-  type FieldRef,
   type FieldSource,
   type LineSubfieldDef,
   type MappingFormat,
@@ -29,6 +17,7 @@ import {
   type SourceField,
   type TargetFieldDef,
 } from "../api";
+import { type CanvasTargetSection, FieldMappingCanvas } from "./FieldMappingCanvas";
 import { Alert, Badge, Button, CodeBlock, EmptyState, SelectField, TextArea, TextField } from "./ui";
 
 const FORMAT_OPTIONS = [
@@ -37,14 +26,6 @@ const FORMAT_OPTIONS = [
   { value: "cii", label: "CII (raw XML)" },
   { value: "zugferd", label: "ZUGFeRD / Factur-X (PDF)" },
 ];
-
-function encodeRef(f: SourceField | FieldRef): string {
-  return JSON.stringify({ parent_tag: f.parent_tag, tag: f.tag, occurrence: f.occurrence });
-}
-
-function decodeRef(key: string): FieldRef {
-  return JSON.parse(key) as FieldRef;
-}
 
 function downloadBlob(filename: string, content: string, mimeType: string, isBase64 = false) {
   const blob = isBase64
@@ -101,64 +82,6 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-}
-
-/** One target field's source: a dropdown of candidate source fields, or a
- * constant value — toggled by two small mode buttons. */
-function SourceFieldSelector({
-  value,
-  onChange,
-  options,
-}: {
-  value: FieldSource | undefined;
-  onChange: (v: FieldSource | undefined) => void;
-  options: SourceField[];
-}) {
-  const mode = value?.kind ?? "field";
-  return (
-    <div className="mapping-control">
-      <div className="mode-toggle">
-        <button
-          type="button"
-          className={mode === "field" ? "active" : ""}
-          onClick={() => value?.kind === "constant" && onChange(undefined)}
-        >
-          Field
-        </button>
-        <button
-          type="button"
-          className={mode === "constant" ? "active" : ""}
-          onClick={() => onChange({ kind: "constant", value: value?.kind === "constant" ? value.value : "" })}
-        >
-          Constant
-        </button>
-      </div>
-      {mode === "field" ? (
-        <div className="select-wrap">
-          <select
-            className="select"
-            value={value?.kind === "field" ? encodeRef(value.ref) : ""}
-            onChange={(e) => onChange(e.target.value ? { kind: "field", ref: decodeRef(e.target.value) } : undefined)}
-          >
-            <option value="">— none —</option>
-            {options.map((o) => (
-              <option key={encodeRef(o)} value={encodeRef(o)}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={13} />
-        </div>
-      ) : (
-        <input
-          className="input"
-          placeholder="constant value"
-          value={value?.kind === "constant" ? value.value : ""}
-          onChange={(e) => onChange({ kind: "constant", value: e.target.value })}
-        />
-      )}
-    </div>
-  );
 }
 
 /** Sample/apply document input: textarea for text-based formats, a
@@ -325,6 +248,21 @@ export function MappingTab() {
     return [...groups.entries()];
   }, [targetDefs]);
 
+  const headerTargetSections: CanvasTargetSection[] = useMemo(
+    () => groupedHeaderFields.map(([group, fields]) => ({ title: group, fields })),
+    [groupedHeaderFields],
+  );
+
+  const lineTargetSections: CanvasTargetSection[] = useMemo(
+    () => [
+      {
+        title: null,
+        fields: (targetDefs?.lineSubfields ?? []).map((s) => ({ field: s.subfield, label: s.label })),
+      },
+    ],
+    [targetDefs],
+  );
+
   function buildFieldMappings(): FieldMapping[] {
     const mappings: FieldMapping[] = [];
     for (const [field, source] of Object.entries(headerSources)) {
@@ -365,6 +303,12 @@ export function MappingTab() {
     await deleteMappingProfile(id);
     if (selectedProfileId === id) setSelectedProfileId(null);
     await refreshProfiles();
+  }
+
+  function handleDownloadProfile(p: MappingProfile) {
+    const portable = { name: p.name, fromFormat: p.fromFormat, toFormat: p.toFormat, fieldMappings: p.fieldMappings };
+    const filename = `${p.name.trim().replace(/[^a-z0-9-_]+/gi, "-").toLowerCase() || "mapping"}.json`;
+    downloadBlob(filename, JSON.stringify(portable, null, 2), "application/json");
   }
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? null;
@@ -510,60 +454,41 @@ export function MappingTab() {
           <div className="section-heading">
             <span className="step-badge">2</span> Map header fields
           </div>
-          {groupedHeaderFields.map(([group, fields]) => (
-            <div key={group} className="field-group">
-              <div className="field-group-title">{group}</div>
-              <div className="table-scroll">
-                <table className="table">
-                  <tbody>
-                    {fields.map((t) => (
-                      <tr key={t.field}>
-                        <td style={{ width: "32%" }}>{t.label}</td>
-                        <td>
-                          <SourceFieldSelector
-                            value={headerSources[t.field]}
-                            onChange={(v) => setHeaderSources({ ...headerSources, [t.field]: v })}
-                            options={headerFields}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
+          <p className="hint" style={{ marginTop: -4 }}>
+            Drag a source field onto a target field to connect them — or click a source field, then
+            click a target field. Click a target's value to type a constant instead.
+          </p>
+          <FieldMappingCanvas
+            sourceFields={headerFields}
+            targetSections={headerTargetSections}
+            values={headerSources}
+            onChange={(field, source) => setHeaderSources((prev) => ({ ...prev, [field]: source }))}
+            sourceHeading={`Source (${fromFormat}) — ${headerFields.length} fields`}
+            targetHeading={`Target (${toFormat}) — header`}
+          />
 
           <div className="section-heading">
             <span className="step-badge">3</span> Map line items
           </div>
           <p className="hint" style={{ marginTop: -4 }}>
-            <Layers size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
             One template, applied to every line-item group a target document has — not just the{" "}
             {lineCount} in this sample.
           </p>
-          <div className="table-scroll">
-            <table className="table">
-              <tbody>
-                {targetDefs.lineSubfields.map((t) => (
-                  <tr key={t.subfield}>
-                    <td style={{ width: "32%" }}>{t.label}</td>
-                    <td>
-                      <SourceFieldSelector
-                        value={lineSources[t.subfield]}
-                        onChange={(v) => setLineSources({ ...lineSources, [t.subfield]: v })}
-                        options={lineTemplateFields}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <FieldMappingCanvas
+            sourceFields={lineTemplateFields}
+            targetSections={lineTargetSections}
+            values={lineSources}
+            onChange={(field, source) => setLineSources((prev) => ({ ...prev, [field]: source }))}
+            sourceHeading={`Source (${fromFormat}) — line template`}
+            targetHeading={`Target (${toFormat}) — line items`}
+          />
 
           <div className="section-heading">
             <span className="step-badge">4</span> Save
           </div>
+          <p className="hint" style={{ marginTop: -4 }}>
+            You need to save the mapping before it can be used to create a document.
+          </p>
           <div className="form-row">
             <TextField
               label="Mapping name"
@@ -607,6 +532,17 @@ export function MappingTab() {
                 </div>
               </div>
               <div className="profile-card-actions">
+                <button
+                  className="icon-btn icon-btn-neutral"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDownloadProfile(p);
+                  }}
+                  title="Download mapping"
+                  type="button"
+                >
+                  <Download size={14} />
+                </button>
                 <button
                   className="icon-btn"
                   onClick={(e) => {

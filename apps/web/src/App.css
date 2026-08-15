@@ -538,6 +538,10 @@
   color: var(--danger);
 }
 
+.icon-btn-neutral:hover {
+  color: var(--accent);
+}
+
 /* Create tool: repeatable line-item cards */
 .line-item-list {
   display: flex;
@@ -578,4 +582,203 @@
   background: var(--border);
   border: none;
   margin: 24px 0;
+}
+
+/* Mapping tool: drag-to-connect field mapping canvas. Deliberately
+   wider than the page's normal 760px content column — two field
+   panels plus a line gutter need the room; --canvas-w clamps against
+   the actual viewport (minus sidebar + page padding) so it degrades
+   to the normal column width on narrow screens instead of overflowing. */
+.mapping-canvas {
+  --canvas-w: min(1100px, calc(100vw - 296px));
+  width: var(--canvas-w);
+  margin-left: calc((var(--canvas-w) - 760px) / -2);
+  margin-right: calc((var(--canvas-w) - 760px) / -2);
+  margin-bottom: 20px;
+  position: relative;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.mapping-canvas.dragging {
+  cursor: grabbing;
+}
+
+.mapping-canvas.dragging .canvas-row {
+  user-select: none;
+}
+
+.mapping-canvas-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mapping-canvas-panel:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.mapping-canvas-panel-header {
+  padding: 12px 14px 0;
+}
+
+.mapping-canvas-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 14px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: var(--surface-sunken);
+}
+
+.mapping-canvas-filter input {
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--fg);
+  outline: none;
+  width: 100%;
+  font-family: var(--font-sans);
+}
+
+.mapping-canvas-filter input::placeholder {
+  color: var(--placeholder);
+}
+
+.mapping-canvas-scroll {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 420px;
+  padding: 0 10px 12px;
+}
+
+.canvas-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+
+.canvas-row-source {
+  color: var(--fg-secondary);
+  background: var(--surface-sunken);
+}
+
+.canvas-row-source:hover {
+  border-color: var(--border-strong);
+}
+
+.canvas-row-source.connected {
+  color: var(--fg);
+}
+
+.canvas-row-source.armed {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.canvas-row-source.dragging {
+  opacity: 0.5;
+}
+
+.canvas-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-row-target {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.canvas-row-target:hover {
+  border-color: var(--border-strong);
+}
+
+.canvas-row-target.drag-hover {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.canvas-row-target.connected {
+  border-color: var(--success-border);
+  background: var(--success-subtle);
+}
+
+.canvas-row-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 55%;
+}
+
+.canvas-value-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+}
+
+.canvas-value-chip.constant {
+  cursor: text;
+  color: var(--accent);
+  font-family: var(--font-sans);
+}
+
+.canvas-placeholder {
+  color: var(--placeholder);
+  font-size: 11.5px;
+  cursor: text;
+  white-space: nowrap;
+}
+
+.canvas-value-input {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 12px;
+  padding: 3px 6px;
+  width: 110px;
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+.mapping-canvas-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.mapping-canvas-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.75;
+  opacity: 0.7;
+}
+
+.mapping-canvas-line-ghost {
+  stroke: var(--accent);
+  stroke-dasharray: 4 3;
+  opacity: 0.9;
 }
