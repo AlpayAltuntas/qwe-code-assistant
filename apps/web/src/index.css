@@ -1,4 +1,10 @@
 :root {
+  /* Governs native form controls (number-input spinners, checkboxes,
+     scrollbars) that our own tokens can't reach — "light dark" here
+     just means "let the browser pick based on the OS", which is right
+     for the system default but wrong once data-theme forces an
+     explicit choice below; those overrides pin it so native controls
+     actually follow the in-app toggle instead of the OS setting. */
   color-scheme: light dark;
 
   /* Surfaces */
@@ -105,7 +111,12 @@
   }
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0e0f12;
   --bg-sidebar: #131417;
   --surface: #17181c;

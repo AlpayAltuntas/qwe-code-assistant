@@ -5,6 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EDI / e-invoicing toolkit</title>
+    <script>
+      // Runs before first paint so an explicit light/dark choice applies
+      // immediately — no flash of the wrong theme while React mounts.
+      (function () {
+        var stored = localStorage.getItem("theme");
+        if (stored === "light" || stored === "dark") document.documentElement.dataset.theme = stored;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

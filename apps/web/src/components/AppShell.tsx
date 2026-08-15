@@ -1,5 +1,6 @@
-import { FilePlus2, FileSearch, Layers, Sparkles, Waypoints } from "lucide-react";
+import { FilePlus2, FileSearch, Layers, Monitor, Moon, Sparkles, Sun, Waypoints } from "lucide-react";
 import type { ReactNode } from "react";
+import { type ThemePreference, useTheme } from "../useTheme";
 
 export type Tab = "generate" | "inspect" | "mapping" | "create";
 
@@ -10,6 +11,12 @@ const NAV_ITEMS: { tab: Tab; label: string; icon: ReactNode }[] = [
   { tab: "create", label: "Create", icon: <FilePlus2 size={16} /> },
 ];
 
+const THEME_OPTIONS: { pref: ThemePreference; icon: ReactNode; label: string }[] = [
+  { pref: "light", icon: <Sun size={13} />, label: "Light theme" },
+  { pref: "system", icon: <Monitor size={13} />, label: "Match system theme" },
+  { pref: "dark", icon: <Moon size={13} />, label: "Dark theme" },
+];
+
 interface AppShellProps {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -18,6 +25,8 @@ interface AppShellProps {
 }
 
 export function AppShell({ activeTab, onTabChange, apiConnected, children }: AppShellProps) {
+  const [theme, setTheme] = useTheme();
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -45,13 +54,30 @@ export function AppShell({ activeTab, onTabChange, apiConnected, children }: App
           ))}
         </nav>
 
-        <div className="sidebar-footer">
-          <span
-            className={`status-dot ${
-              apiConnected === null ? "status-dot-pending" : apiConnected ? "status-dot-ok" : "status-dot-off"
-            }`}
-          />
-          {apiConnected === null ? "Checking API…" : apiConnected ? "API connected" : "API unreachable"}
+        <div className="sidebar-bottom">
+          <div className="mode-toggle mode-toggle-icon theme-toggle">
+            {THEME_OPTIONS.map((o) => (
+              <button
+                key={o.pref}
+                type="button"
+                className={theme === o.pref ? "active" : ""}
+                onClick={() => setTheme(o.pref)}
+                title={o.label}
+                aria-label={o.label}
+              >
+                {o.icon}
+              </button>
+            ))}
+          </div>
+
+          <div className="sidebar-footer">
+            <span
+              className={`status-dot ${
+                apiConnected === null ? "status-dot-pending" : apiConnected ? "status-dot-ok" : "status-dot-off"
+              }`}
+            />
+            {apiConnected === null ? "Checking API…" : apiConnected ? "API connected" : "API unreachable"}
+          </div>
         </div>
       </aside>
 
